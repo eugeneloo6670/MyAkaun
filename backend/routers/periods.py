@@ -52,6 +52,16 @@ def set_period_lock(payload: PeriodLockRequest, db: Session = Depends(get_db)):
     return {"month": payload.month, "locked": payload.locked, "action": action}
 
 
+@router.get("/current")
+def get_current_period(db: Session = Depends(get_db)):
+    """Returns the current month's period status. Always returns a value (locked=False if no record)."""
+    month = datetime.utcnow().strftime("%Y-%m")
+    period = db.query(Period).filter_by(month=month).first()
+    if not period:
+        return {"month": month, "locked": False}
+    return period
+
+
 @router.get("/{month}/status")
 def get_period_status(month: str, db: Session = Depends(get_db)):
     period = db.query(Period).filter_by(month=month).first()

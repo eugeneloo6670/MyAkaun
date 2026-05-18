@@ -15,6 +15,7 @@ export const getSupplierMemory = () => api.get("/api/entries/supplier-memory/all
 
 // Periods
 export const getPeriods = () => api.get("/api/periods/")
+export const getCurrentPeriod = () => api.get("/api/periods/current")
 export const getPeriodStatus = (month) => api.get(`/api/periods/${month}/status`)
 export const setPeriodLock = (data) => api.post("/api/periods/lock", data)
 

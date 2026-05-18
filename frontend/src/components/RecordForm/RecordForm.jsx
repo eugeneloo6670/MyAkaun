@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { api } from '../../api/client';
+import api, { getSupplierMemory, getEntries, getCreditors, getPeriodStatus, createEntry } from '../../api/client';
 import styles from './RecordForm.module.css';
 
 // ---------------------------------------------------------------------------
@@ -77,8 +77,14 @@ const emptyForm = (type) => ({
 // Component
 // ---------------------------------------------------------------------------
 
-export default function RecordForm({ currentUser = 'eugene', onRecorded }) {
-  const [form, setForm] = useState(emptyForm('purchase'));
+export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill }) {
+  const [form, setForm] = useState(() => {
+    // If prefill says "pay this supplier", start in payment mode with supplier filled
+    if (prefill?.action === 'pay' && prefill.supplier) {
+      return { ...emptyForm('payment'), supplier: prefill.supplier };
+    }
+    return emptyForm('purchase');
+  });
   const [suppliers, setSuppliers] = useState([]);
   const [supplierMemory, setSupplierMemory] = useState({}); // supplier -> { last_gl, last_currency }
   const [supplierBalance, setSupplierBalance] = useState(null);
@@ -100,14 +106,19 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded }) {
   // Load supplier list + memory on mount
   useEffect(() => {
     let cancelled = false;
-    api.get('/api/entries/suppliers')
+    getSupplierMemory()
       .then((res) => {
         if (cancelled) return;
         const list = res.data || [];
-        setSuppliers(list.map((s) => s.name));
+        setSuppliers(list.map((s) => s.supplier));
         const mem = {};
         list.forEach((s) => {
-          mem[s.name] = { last_gl: s.last_gl, last_currency: s.last_currency };
+          // last_gl is stored as "5100|Cost of Goods Sold" — split on pipe
+          const [glCode] = (s.last_gl || '').split('|');
+          mem[s.supplier] = {
+            last_gl: glCode || '',
+            last_currency: s.last_ccy || 'MYR',
+          };
         });
         setSupplierMemory(mem);
       })
@@ -120,7 +131,7 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded }) {
     if (!form.date) return;
     let cancelled = false;
     const p = periodKey(form.date);
-    api.get(`/api/periods/${p}`)
+    getPeriodStatus(p)
       .then((res) => {
         if (!cancelled) setPeriodLocked(Boolean(res.data?.locked));
       })
@@ -135,11 +146,13 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded }) {
       return;
     }
     let cancelled = false;
-    api.get(`/api/reports/creditors`, { params: { supplier: form.supplier } })
+    // Backend doesn't support ?supplier=X filter on creditors — fetch all, filter client-side
+    getCreditors()
       .then((res) => {
         if (cancelled) return;
-        const bal = res.data?.balance ?? res.data?.[0]?.balance ?? null;
-        setSupplierBalance(bal !== null ? Number(bal) : null);
+        const list = Array.isArray(res.data) ? res.data : [];
+        const found = list.find((c) => c.supplier === form.supplier);
+        setSupplierBalance(found ? Number(found.balance) : 0);
       })
       .catch(() => { if (!cancelled) setSupplierBalance(null); });
     return () => { cancelled = true; };
@@ -152,9 +165,7 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded }) {
       return;
     }
     let cancelled = false;
-    api.get(`/api/entries`, {
-      params: { supplier: form.supplier, type: 'purchase' },
-    })
+    getEntries({ supplier: form.supplier, type: 'purchase' })
       .then((res) => {
         if (!cancelled) setLinkableEntries(res.data || []);
       })
@@ -176,14 +187,14 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded }) {
   // Auto-fill GL + SST + currency from linked transaction
   useEffect(() => {
     if (!isReversal || !form.linked_txn) return;
-    const linked = linkableEntries.find((e) => e.txn_id === form.linked_txn);
+    const linked = linkableEntries.find((e) => e.short_id === form.linked_txn);
     if (!linked) return;
     setForm((f) => ({
       ...f,
       gl_code: linked.gl_code || f.gl_code,
       sst_rate: linked.sst_rate ?? f.sst_rate,
-      fx_enabled: Boolean(linked.fx_currency) || f.fx_enabled,
-      fx_currency: linked.fx_currency || f.fx_currency,
+      fx_enabled: Boolean(linked.orig_ccy && linked.orig_ccy !== 'MYR') || f.fx_enabled,
+      fx_currency: (linked.orig_ccy && linked.orig_ccy !== 'MYR') ? linked.orig_ccy : f.fx_currency,
     }));
   }, [form.linked_txn, linkableEntries, isReversal]);
 
@@ -284,9 +295,10 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded }) {
         effectiveAmount,
         fxMyrEquivalent,
         paymentDiscount,
+        supplierBalance,
       });
-      const res = await api.post('/api/entries', payload);
-      const txn = res.data?.txn_id || 'TXN-??????';
+      const res = await createEntry(payload);
+      const txn = res.data?.short_id || 'TXN-??????';
       setToast({ kind: 'success', msg: `Recorded ${txn}` });
       setForm((f) => emptyForm(f.type));
       if (onRecorded) onRecorded(res.data);
@@ -409,8 +421,8 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded }) {
             >
               <option value="">— select original purchase —</option>
               {linkableEntries.map((e) => (
-                <option key={e.txn_id} value={e.txn_id}>
-                  {e.txn_id} · {e.date} · {fmtMYR(e.amount_myr ?? e.amount)} · {e.reference}
+                <option key={e.short_id} value={e.short_id}>
+                  {e.short_id} · {e.date} · {fmtMYR(e.total)} · {e.reference}
                 </option>
               ))}
             </select>
@@ -648,43 +660,80 @@ function docRefHint(type, paymentDiscount) {
 }
 
 function buildPayload(form, ctx) {
-  const { currentUser, effectiveAmount, fxMyrEquivalent, paymentDiscount } = ctx;
+  const { currentUser, effectiveAmount, fxMyrEquivalent, paymentDiscount, supplierBalance } = ctx;
+
+  // GL name lookup
+  const glRecord = GL_CODES.find((g) => g.code === form.gl_code);
+  const glName = glRecord ? glRecord.name : '';
+
+  // Map UI types → backend types.
+  // Backend supports: purchase | return | payment.
+  // "Credit Note" in the UI maps to backend type="return" (functionally identical reversal).
+  const backendType = (form.type === 'credit_note') ? 'return' : form.type;
 
   const base = {
-    type: form.type,
     date: form.date,
+    type: backendType,
     supplier: form.supplier.trim(),
     reference: form.reference.trim(),
     doc_ref: form.doc_ref.trim() || null,
     recorded_by: currentUser,
+    sst_rate: 0,
+    sst_amount: 0,
+    amount: 0,
+    total: 0,
+    orig_ccy: 'MYR',
   };
 
   if (form.type === 'purchase' || form.type === 'credit_note' || form.type === 'return') {
     base.gl_code = form.gl_code;
-    base.sst_rate = form.sst_rate;
-    base.amount_myr = effectiveAmount;
+    base.gl_name = glName;
+    base.sst_rate = Number(form.sst_rate) || 0;
+
+    // Determine the gross MYR figure
+    const grossMYR = (form.fx_enabled && fxMyrEquivalent !== null)
+      ? fxMyrEquivalent
+      : (parseFloat(form.amount) || 0);
+
+    // amount = net (excl SST), sst_amount = derived, total = gross
+    // SST is calculated on the net amount: gross = net + (net * rate/100) ⇒ net = gross / (1 + rate/100)
+    const rate = base.sst_rate / 100;
+    const net = rate > 0 ? grossMYR / (1 + rate) : grossMYR;
+    const sst = grossMYR - net;
+
+    base.amount = Number(net.toFixed(2));
+    base.sst_amount = Number(sst.toFixed(2));
+    base.total = Number(grossMYR.toFixed(2));
+
     if (form.fx_enabled) {
-      base.fx_currency = form.fx_currency;
-      base.fx_original = parseFloat(form.fx_original);
+      base.orig_ccy = form.fx_currency;
+      base.orig_amount = parseFloat(form.fx_original);
       base.fx_rate = parseFloat(form.fx_rate);
-      base.amount_myr = fxMyrEquivalent;
     }
+
+    // For credit notes / returns: store as negative; link to original
     if (form.type !== 'purchase') {
-      base.linked_txn = form.linked_txn;
-      // Stored negative — backend may also flip the sign; sending negative is the
-      // explicit contract per v2 spec in HANDOFF.md.
-      base.amount_myr = -Math.abs(base.amount_myr);
-      if (base.fx_original) base.fx_original = -Math.abs(base.fx_original);
+      base.linked_to = form.linked_txn;
+      base.amount = -Math.abs(base.amount);
+      base.sst_amount = -Math.abs(base.sst_amount);
+      base.total = -Math.abs(base.total);
+      if (base.orig_amount) base.orig_amount = -Math.abs(base.orig_amount);
     }
   }
 
   if (form.type === 'payment') {
-    base.amount_paid = parseFloat(form.amount_paid);
-    base.payment_method = form.payment_method;
-    base.gl_code = AP_GL;
+    base.gl_code = '2100';
+    base.gl_name = 'Accounts Payable';
+    base.paid = parseFloat(form.amount_paid);
+    base.balance_owed = supplierBalance ?? 0;
+    base.total = base.paid;  // total = amount of cash out
+    base.amount = base.paid;
     if (paymentDiscount?.discount > 0) {
-      base.discount_amount = paymentDiscount.discount;
-      base.discount_gl = DISCOUNT_GL;
+      base.discount_received = paymentDiscount.discount;
+    }
+    // Payment method goes into description since backend has no dedicated field
+    if (form.payment_method) {
+      base.description = `Payment via ${form.payment_method.replace('_', ' ')}`;
     }
   }
 

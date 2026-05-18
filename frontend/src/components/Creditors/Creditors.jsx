@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useMemo } from 'react';
-import { api } from '../../api/client';
+import api, { getCreditors, getEntries } from '../../api/client';
 import styles from './Creditors.module.css';
 
 // ---------------------------------------------------------------------------
@@ -7,10 +7,10 @@ import styles from './Creditors.module.css';
 // ---------------------------------------------------------------------------
 
 const BUCKETS = [
-  { id: 'current', label: 'Current',   range: '0–30 d',    key: 'aging_0_30' },
-  { id: 'b30',     label: '31–60 d',   range: '31–60 d',   key: 'aging_31_60' },
-  { id: 'b60',     label: '61–90 d',   range: '61–90 d',   key: 'aging_61_90' },
-  { id: 'b90',     label: '90+ d',     range: '90+ d',     key: 'aging_90_plus' },
+  { id: 'current', label: 'Current',   range: '0–30 d',    key: 'current' },
+  { id: 'b30',     label: '31–60 d',   range: '31–60 d',   key: 'd30' },
+  { id: 'b60',     label: '61–90 d',   range: '61–90 d',   key: 'd60' },
+  { id: 'b90',     label: '90+ d',     range: '90+ d',     key: 'd90plus' },
 ];
 
 const SORT_OPTIONS = [
@@ -57,12 +57,12 @@ export default function Creditors({ onSelectSupplier, onSelectEntry, refreshTrig
     setLoading(true);
     setError(null);
 
-    api.get('/api/reports/creditors')
+    getCreditors()
       .then((res) => {
         if (cancelled) return;
-        // Accept either an array directly or { creditors: [...] }
-        const data = Array.isArray(res.data) ? res.data : (res.data?.creditors || []);
-        setCreditors(data);
+        const data = Array.isArray(res.data) ? res.data : [];
+        // Filter out fully-settled creditors (balance ≈ 0) for cleaner view
+        setCreditors(data.filter((c) => Math.abs(Number(c.balance ?? 0)) > 0.005));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -85,10 +85,10 @@ export default function Creditors({ onSelectSupplier, onSelectEntry, refreshTrig
     let cancelled = false;
     setLoadingSupplier(expandedSupplier);
 
-    api.get('/api/entries', { params: { supplier: expandedSupplier } })
+    getEntries({ supplier: expandedSupplier })
       .then((res) => {
         if (cancelled) return;
-        const list = Array.isArray(res.data) ? res.data : (res.data?.entries || []);
+        const list = Array.isArray(res.data) ? res.data : [];
         setSupplierEntries((prev) => ({ ...prev, [expandedSupplier]: list }));
       })
       .catch(() => {
@@ -106,13 +106,13 @@ export default function Creditors({ onSelectSupplier, onSelectEntry, refreshTrig
   // -------------------------------------------------------------------------
 
   const totals = useMemo(() => {
-    const t = { total: 0, aging_0_30: 0, aging_31_60: 0, aging_61_90: 0, aging_90_plus: 0 };
+    const t = { total: 0, current: 0, d30: 0, d60: 0, d90plus: 0 };
     for (const c of creditors) {
-      t.total          += Number(c.balance ?? 0);
-      t.aging_0_30     += Number(c.aging_0_30 ?? 0);
-      t.aging_31_60    += Number(c.aging_31_60 ?? 0);
-      t.aging_61_90    += Number(c.aging_61_90 ?? 0);
-      t.aging_90_plus  += Number(c.aging_90_plus ?? 0);
+      t.total   += Number(c.balance ?? 0);
+      t.current += Number(c.aged?.current ?? 0);
+      t.d30     += Number(c.aged?.d30 ?? 0);
+      t.d60     += Number(c.aged?.d60 ?? 0);
+      t.d90plus += Number(c.aged?.d90plus ?? 0);
     }
     return t;
   }, [creditors]);
@@ -126,7 +126,7 @@ export default function Creditors({ onSelectSupplier, onSelectEntry, refreshTrig
         return arr.sort((a, b) => (a.supplier || '').localeCompare(b.supplier || ''));
       case 'oldest':
         return arr.sort((a, b) =>
-          Number(b.aging_90_plus ?? 0) - Number(a.aging_90_plus ?? 0)
+          Number(b.aged?.d90plus ?? 0) - Number(a.aged?.d90plus ?? 0)
         );
       case 'balance_desc':
       default:
@@ -231,8 +231,8 @@ export default function Creditors({ onSelectSupplier, onSelectEntry, refreshTrig
                 const isExpanded = expandedSupplier === c.supplier;
                 const balance = Number(c.balance ?? 0);
                 const hasOverdue =
-                  Number(c.aging_61_90 ?? 0) > 0 ||
-                  Number(c.aging_90_plus ?? 0) > 0;
+                  Number(c.aged?.d60 ?? 0) > 0 ||
+                  Number(c.aged?.d90plus ?? 0) > 0;
                 return (
                   <Fragment key={c.supplier}>
                     <tr
@@ -246,19 +246,19 @@ export default function Creditors({ onSelectSupplier, onSelectEntry, refreshTrig
                       </td>
                       <td className={styles.colSupplier}>
                         <div className={styles.supplierName}>{c.supplier}</div>
-                        {c.last_activity && (
+                        {c.transaction_count !== undefined && (
                           <div className={styles.supplierMeta}>
-                            Last activity {fmtDate(c.last_activity)}
+                            {c.transaction_count} transactions
                           </div>
                         )}
                       </td>
-                      <td className={styles.colAging}>{fmtMYR(c.aging_0_30)}</td>
-                      <td className={styles.colAging}>{fmtMYR(c.aging_31_60)}</td>
-                      <td className={`${styles.colAging} ${Number(c.aging_61_90) > 0 ? styles.agingAmber : ''}`}>
-                        {fmtMYR(c.aging_61_90)}
+                      <td className={styles.colAging}>{fmtMYR(c.aged?.current)}</td>
+                      <td className={styles.colAging}>{fmtMYR(c.aged?.d30)}</td>
+                      <td className={`${styles.colAging} ${Number(c.aged?.d60) > 0 ? styles.agingAmber : ''}`}>
+                        {fmtMYR(c.aged?.d60)}
                       </td>
-                      <td className={`${styles.colAging} ${Number(c.aging_90_plus) > 0 ? styles.agingRed : ''}`}>
-                        {fmtMYR(c.aging_90_plus)}
+                      <td className={`${styles.colAging} ${Number(c.aged?.d90plus) > 0 ? styles.agingRed : ''}`}>
+                        {fmtMYR(c.aged?.d90plus)}
                       </td>
                       <td className={styles.colBalance}>
                         <strong>{fmtMYR(balance)}</strong>
@@ -327,14 +327,14 @@ function SupplierDrawer({ supplier, entries, loading, onSelectEntry }) {
         </thead>
         <tbody>
           {entries.slice(0, 10).map((e) => {
-            const amt = Number(e.amount_myr ?? e.amount ?? 0);
+            const amt = Number(e.total ?? 0);
             return (
               <tr
-                key={e.txn_id}
+                key={e.short_id}
                 onClick={() => onSelectEntry && onSelectEntry(e)}
                 className={styles.drawerRow}
               >
-                <td><code className={styles.txnId}>{e.txn_id}</code></td>
+                <td><code className={styles.txnId}>{e.short_id}</code></td>
                 <td>{fmtDate(e.date)}</td>
                 <td>{e.type}</td>
                 <td>{e.reference}</td>

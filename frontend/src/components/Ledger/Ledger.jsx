@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { api } from '../../api/client';
+import api, { getEntries } from '../../api/client';
 import styles from './Ledger.module.css';
 
 // ---------------------------------------------------------------------------
@@ -105,27 +105,43 @@ export default function Ledger({ onSelectEntry, refreshTrigger }) {
     setLoading(true);
     setError(null);
     try {
-      const params = {
-        limit: PAGE_SIZE,
-        offset: (page - 1) * PAGE_SIZE,
-      };
-      if (filters.type)       params.type       = filters.type;
-      if (filters.gl_code)    params.gl_code    = filters.gl_code;
-      if (filters.supplier)   params.supplier   = filters.supplier;
-      if (filters.date_from)  params.date_from  = filters.date_from;
-      if (filters.date_to)    params.date_to    = filters.date_to;
-      if (filters.doc_status) params.doc_status = filters.doc_status;
-      if (filters.search)     params.search     = filters.search;
+      // Backend supports: month, supplier, type, missing_docs (no date range, no GL filter, no search)
+      const params = {};
+      if (filters.type)      params.type     = filters.type;
+      if (filters.supplier)  params.supplier = filters.supplier;
+      if (filters.doc_status === 'missing') params.missing_docs = true;
+      // If a specific month is implied by date_from, use it
+      if (filters.date_from) params.month = filters.date_from.slice(0, 7);
 
-      const res = await api.get('/api/entries', { params });
-      // Backend may return { entries: [...], total: N } or just an array
-      if (Array.isArray(res.data)) {
-        setEntries(res.data);
-        setTotal(res.data.length);
-      } else {
-        setEntries(res.data?.entries || []);
-        setTotal(res.data?.total ?? (res.data?.entries?.length || 0));
+      const res = await getEntries(params);
+      let list = Array.isArray(res.data) ? res.data : [];
+
+      // Client-side post-filtering for things backend doesn't support
+      if (filters.gl_code) {
+        list = list.filter((e) => e.gl_code === filters.gl_code);
       }
+      if (filters.date_from) {
+        list = list.filter((e) => e.date >= filters.date_from);
+      }
+      if (filters.date_to) {
+        list = list.filter((e) => e.date <= filters.date_to);
+      }
+      if (filters.doc_status === 'filed') {
+        list = list.filter((e) => Boolean(e.doc_ref));
+      }
+      if (filters.search) {
+        const s = filters.search.toLowerCase();
+        list = list.filter((e) =>
+          (e.supplier || '').toLowerCase().includes(s) ||
+          (e.reference || '').toLowerCase().includes(s) ||
+          (e.short_id || '').toLowerCase().includes(s) ||
+          (e.description || '').toLowerCase().includes(s)
+        );
+      }
+
+      setTotal(list.length);
+      const start = (page - 1) * PAGE_SIZE;
+      setEntries(list.slice(start, start + PAGE_SIZE));
     } catch (err) {
       setError(err?.response?.data?.detail || 'Failed to load entries');
       setEntries([]);
@@ -155,7 +171,7 @@ export default function Ledger({ onSelectEntry, refreshTrigger }) {
       missingDocs: 0,
     };
     for (const e of entries) {
-      const amt = Number(e.amount_myr ?? e.amount ?? 0);
+      const amt = Number(e.total ?? 0);
       if (amt >= 0) m.totalDebit += amt;
       else m.totalCredit += Math.abs(amt);
       if (!e.doc_ref) m.missingDocs++;
@@ -178,7 +194,7 @@ export default function Ledger({ onSelectEntry, refreshTrigger }) {
   });
 
   const handleRowClick = (entry) => {
-    setSelectedId(entry.txn_id);
+    setSelectedId(entry.short_id);
     if (onSelectEntry) onSelectEntry(entry);
   };
 
@@ -189,9 +205,9 @@ export default function Ledger({ onSelectEntry, refreshTrigger }) {
       'GL', 'Amount MYR', 'SST %', 'Doc Ref', 'Recorded By',
     ];
     const rows = entries.map((e) => [
-      e.txn_id, fmtDate(e.date), typeLabel(e.type),
+      e.short_id, fmtDate(e.date), typeLabel(e.type),
       e.supplier, e.reference, e.gl_code,
-      e.amount_myr ?? e.amount, e.sst_rate ?? '',
+      e.total, e.sst_rate ?? '',
       e.doc_ref || '', e.recorded_by || '',
     ]);
     const csv = [headers, ...rows]
@@ -316,17 +332,17 @@ export default function Ledger({ onSelectEntry, refreshTrigger }) {
             </thead>
             <tbody>
               {entries.map((e) => {
-                const amt = Number(e.amount_myr ?? e.amount ?? 0);
+                const amt = Number(e.total ?? 0);
                 const isNegative = amt < 0;
-                const isSelected = selectedId === e.txn_id;
+                const isSelected = selectedId === e.short_id;
                 return (
                   <tr
-                    key={e.txn_id || `${e.date}-${e.reference}`}
+                    key={e.short_id || `${e.date}-${e.reference}`}
                     className={`${styles.row} ${isSelected ? styles.rowSelected : ''}`}
                     onClick={() => handleRowClick(e)}
                   >
                     <td className={styles.colTxn}>
-                      <code className={styles.txnId}>{e.txn_id}</code>
+                      <code className={styles.txnId}>{e.short_id}</code>
                     </td>
                     <td className={styles.colDate}>{fmtDate(e.date)}</td>
                     <td className={styles.colType}>
@@ -341,9 +357,9 @@ export default function Ledger({ onSelectEntry, refreshTrigger }) {
                     </td>
                     <td className={`${styles.colAmount} ${isNegative ? styles.amountNeg : ''}`}>
                       {fmtMYR(amt)}
-                      {e.fx_currency && (
+                      {e.orig_ccy && e.orig_ccy !== 'MYR' && (
                         <div className={styles.fxLine}>
-                          {e.fx_original} {e.fx_currency} @ {e.fx_rate}
+                          {e.orig_amount} {e.orig_ccy} @ {e.fx_rate}
                         </div>
                       )}
                     </td>
