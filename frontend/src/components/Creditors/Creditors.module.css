@@ -1,0 +1,364 @@
+/* Creditors.module.css
+   -------------------
+   Aging buckets up top, supplier table with expandable drill-down rows.
+*/
+
+.creditors {
+  --bg: #fafbfc;
+  --surface: #ffffff;
+  --border: #e3e7ec;
+  --border-strong: #c8cfd6;
+  --ink: #1a2530;
+  --ink-soft: #5a6672;
+  --ink-mute: #8a929b;
+  --accent: #0f766e;
+  --accent-soft: #d1faf4;
+  --amber: #b45309;
+  --amber-soft: #fef3c7;
+  --red: #b91c1c;
+  --red-soft: #fee2e2;
+  --green: #166534;
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* ----- Header ----- */
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  gap: 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+
+.sortLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  font-weight: 600;
+}
+
+.input {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* ----- Bucket row ----- */
+
+.bucketRow {
+  display: grid;
+  grid-template-columns: 1.4fr repeat(4, 1fr);
+  gap: 10px;
+  padding: 14px 22px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.bucket {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bucketTotal {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.bucketTotal .bucketLabel { color: rgba(255,255,255,0.7); }
+.bucketTotal .bucketValue { color: #fff; }
+.bucketTotal .bucketRange { color: rgba(255,255,255,0.5); }
+
+.bucketOverdue {
+  border-color: #fca5a5;
+  background: var(--red-soft);
+}
+
+.bucketOverdue .bucketLabel { color: var(--red); }
+.bucketOverdue .bucketValue { color: var(--red); }
+
+.bucketLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  font-weight: 600;
+}
+
+.bucketValue {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bucketRange {
+  font-size: 11px;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.bucketBar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.bucketBarFill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.bucketOverdue .bucketBarFill { background: var(--red); }
+
+/* ----- Table ----- */
+
+.tableWrap {
+  flex: 1;
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 9px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.row {
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.row:hover { background: rgba(15, 118, 110, 0.04); }
+.row td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.rowOverdue {
+  border-left: 3px solid var(--red);
+}
+
+.rowOverdue td:first-of-type { padding-left: 9px; }
+
+.rowExpanded {
+  background: var(--bg);
+}
+
+.detailRow td { padding: 0; border-bottom: 1px solid var(--border); }
+.detailCell { background: var(--bg); padding: 0 !important; }
+
+/* ----- Columns ----- */
+
+.colExpand   { width: 28px; }
+.colSupplier { min-width: 200px; }
+.colAging    {
+  width: 110px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+.colBalance  {
+  width: 130px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+.colAction   { width: 70px; text-align: right; }
+
+.agingAmber { color: var(--amber); font-weight: 600; }
+.agingRed   { color: var(--red);   font-weight: 700; }
+
+.supplierName {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.supplierMeta {
+  font-size: 11px;
+  color: var(--ink-mute);
+  margin-top: 2px;
+}
+
+.chevron {
+  display: inline-block;
+  font-size: 16px;
+  color: var(--ink-mute);
+  transition: transform 150ms ease;
+  font-weight: 700;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+.payBtn {
+  background: var(--accent);
+  border: 0;
+  color: #fff;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.payBtn:hover:not(:disabled) { background: #0b5e57; }
+.payBtn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ----- Drawer ----- */
+
+.drawer {
+  padding: 14px 20px 18px 50px;
+  border-top: 1px dashed var(--border-strong);
+  background: var(--bg);
+}
+
+.drawerHeading {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.drawerTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.drawerTable thead th {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-mute);
+  font-weight: 600;
+}
+
+.drawerRow {
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.drawerRow:hover { background: var(--accent-soft); }
+.drawerRow td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawerRow:last-child td { border-bottom: 0; }
+
+.drawerAmount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.amountNeg { color: var(--red); }
+
+.drawerMore {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink-mute);
+  font-style: italic;
+}
+
+.drawerState {
+  padding: 16px 50px;
+  font-size: 12px;
+  color: var(--ink-mute);
+  background: var(--bg);
+}
+
+.txnId {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  background: var(--bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--ink-soft);
+}
+
+/* ----- States ----- */
+
+.state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--ink-mute);
+}
+
+.stateError { color: var(--red); }
