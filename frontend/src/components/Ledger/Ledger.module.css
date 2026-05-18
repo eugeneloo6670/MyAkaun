@@ -1,0 +1,357 @@
+/* Ledger.module.css
+   -----------------
+   Dense, tabular. Cool neutrals. Row hover + selection states.
+*/
+
+.ledger {
+  --bg: #fafbfc;
+  --surface: #ffffff;
+  --border: #e3e7ec;
+  --border-strong: #c8cfd6;
+  --ink: #1a2530;
+  --ink-soft: #5a6672;
+  --ink-mute: #8a929b;
+  --accent: #0f766e;
+  --accent-soft: #d1faf4;
+  --amber: #b45309;
+  --amber-soft: #fef3c7;
+  --red: #b91c1c;
+  --red-soft: #fee2e2;
+  --green: #166534;
+  --green-soft: #dcfce7;
+  --blue: #1e40af;
+  --blue-soft: #dbeafe;
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+/* ----- Header ----- */
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  gap: 16px;
+}
+
+.titleBlock { min-width: 0; }
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+
+.exportBtn {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  color: var(--ink-soft);
+  padding: 7px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 100ms ease, color 100ms ease;
+}
+
+.exportBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.exportBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ----- Filters ----- */
+
+.filters {
+  display: flex;
+  gap: 8px;
+  padding: 12px 22px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.input {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--ink);
+  font-family: inherit;
+  transition: border-color 100ms ease, box-shadow 100ms ease;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 200px;
+}
+
+.clearBtn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-soft);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.clearBtn:hover { color: var(--accent); }
+
+/* ----- Metrics ----- */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding: 12px 22px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.metric {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metricRed {
+  border-color: #fca5a5;
+  background: var(--red-soft);
+}
+
+.metricLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  font-weight: 600;
+}
+
+.metricRed .metricLabel { color: var(--red); }
+
+.metricValue {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.metricRed .metricValue { color: var(--red); }
+
+/* ----- Table ----- */
+
+.tableWrap {
+  flex: 1;
+  overflow: auto;
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.row {
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.row:hover { background: rgba(15, 118, 110, 0.04); }
+
+.row td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.rowSelected {
+  background: var(--accent-soft) !important;
+}
+
+.rowSelected td {
+  border-bottom-color: #5eead4;
+}
+
+/* ----- Columns ----- */
+
+.colTxn       { width: 110px; }
+.colDate      { width: 96px;  font-variant-numeric: tabular-nums; }
+.colType      { width: 110px; }
+.colSupplier  { min-width: 140px; }
+.colRef       { min-width: 110px; }
+.colGl        { width: 70px; }
+.colAmount    {
+  width: 140px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.colDoc       { width: 50px; text-align: center; }
+.colRecBy     { width: 110px; white-space: nowrap; }
+
+.amountNeg { color: var(--red); }
+
+.fxLine {
+  font-size: 10px;
+  color: var(--ink-mute);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+/* ----- Inline elements ----- */
+
+.txnId, .glCode {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: var(--bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--ink-soft);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.badgePurchase { background: var(--blue-soft);   color: var(--blue); }
+.badgeCredit   { background: var(--amber-soft);  color: var(--amber); }
+.badgeReturn   { background: var(--red-soft);    color: var(--red); }
+.badgePayment  { background: var(--accent-soft); color: var(--accent); }
+.badgeNeutral  { background: var(--border);      color: var(--ink-soft); }
+
+.flagOk, .flagMissing {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.userChip {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.userName {
+  vertical-align: middle;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* ----- States ----- */
+
+.state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--ink-mute);
+  font-size: 13px;
+}
+
+.stateError {
+  color: var(--red);
+}
+
+/* ----- Pagination ----- */
+
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 22px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.pageBtn {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  color: var(--ink-soft);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pageBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pageBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pageInfo {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
