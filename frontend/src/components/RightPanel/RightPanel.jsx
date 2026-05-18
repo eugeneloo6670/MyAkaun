@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { api } from '../../api/client';
+import api, { getAuditLog, getEntries } from '../../api/client';
 import styles from './RightPanel.module.css';
 
 // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ export default function RightPanel({ entry, onClose, onDelete }) {
 
   // Load audit trail + linked entries for the entry
   useEffect(() => {
-    if (!entry?.txn_id) {
+    if (!entry?.short_id) {
       setAuditTrail([]);
       setLinkedEntries([]);
       return;
@@ -86,19 +86,20 @@ export default function RightPanel({ entry, onClose, onDelete }) {
     setLoadingAudit(true);
 
     Promise.allSettled([
-      api.get(`/api/entries/${entry.txn_id}/audit-log`),
-      api.get(`/api/entries/${entry.txn_id}/linked`),
+      getAuditLog({ short_id: entry.short_id }),
+      // Linked entries: find any entry that links TO this one, OR the one this entry links TO
+      getEntries({ linked_to: entry.short_id }),
     ]).then(([auditRes, linkedRes]) => {
       if (cancelled) return;
       if (auditRes.status === 'fulfilled') {
         const data = auditRes.value.data;
-        setAuditTrail(Array.isArray(data) ? data : (data?.events || []));
+        setAuditTrail(Array.isArray(data) ? data : []);
       } else {
         setAuditTrail([]);
       }
       if (linkedRes.status === 'fulfilled') {
         const data = linkedRes.value.data;
-        setLinkedEntries(Array.isArray(data) ? data : (data?.linked || []));
+        setLinkedEntries(Array.isArray(data) ? data : []);
       } else {
         setLinkedEntries([]);
       }
@@ -107,7 +108,7 @@ export default function RightPanel({ entry, onClose, onDelete }) {
     });
 
     return () => { cancelled = true; };
-  }, [entry?.txn_id]);
+  }, [entry?.short_id]);
 
   // -------------------------------------------------------------------------
   // Empty state
@@ -127,9 +128,9 @@ export default function RightPanel({ entry, onClose, onDelete }) {
     );
   }
 
-  const amount = Number(entry.amount_myr ?? entry.amount ?? 0);
+  const amount = Number(entry.total ?? 0);
   const isNegative = amount < 0;
-  const hasFX = Boolean(entry.fx_currency);
+  const hasFX = Boolean(entry.orig_ccy && entry.orig_ccy !== 'MYR');
 
   // -------------------------------------------------------------------------
   // Render
@@ -139,7 +140,7 @@ export default function RightPanel({ entry, onClose, onDelete }) {
     <aside className={styles.panel} aria-label="Entry detail">
       <header className={styles.header}>
         <div>
-          <div className={styles.txnId}>{entry.txn_id}</div>
+          <div className={styles.txnId}>{entry.short_id}</div>
           <div className={styles.entryType}>{typeLabel(entry.type)}</div>
         </div>
         {onClose && (
@@ -167,7 +168,7 @@ export default function RightPanel({ entry, onClose, onDelete }) {
             <div>
               <span className={styles.fxLabel}>Original</span>
               <span className={styles.fxValue}>
-                {fmtFX(entry.fx_original, entry.fx_currency)}
+                {fmtFX(entry.orig_amount, entry.orig_ccy)}
               </span>
             </div>
             <div>
@@ -192,10 +193,10 @@ export default function RightPanel({ entry, onClose, onDelete }) {
         {entry.payment_method && (
           <FieldRow label="Method">{entry.payment_method.replace('_', ' ')}</FieldRow>
         )}
-        {entry.discount_amount > 0 && (
+        {entry.discount_received > 0 && (
           <FieldRow label="Discount taken">
             <span className={styles.discountChip}>
-              {fmtMYR(entry.discount_amount)} → GL 4200
+              {fmtMYR(entry.discount_received)} → GL 4200
             </span>
           </FieldRow>
         )}
@@ -221,11 +222,11 @@ export default function RightPanel({ entry, onClose, onDelete }) {
           <div className={styles.sectionTitle}>Linked transactions</div>
           <div className={styles.linkChips}>
             {linkedEntries.map((l) => (
-              <div key={l.txn_id} className={styles.linkChip}>
-                <code className={styles.code}>{l.txn_id}</code>
+              <div key={l.short_id} className={styles.linkChip}>
+                <code className={styles.code}>{l.short_id}</code>
                 <span className={styles.linkType}>{typeLabel(l.type)}</span>
                 <span className={styles.linkAmount}>
-                  {fmtMYR(Number(l.amount_myr ?? l.amount ?? 0))}
+                  {fmtMYR(Number(l.total ?? 0))}
                 </span>
               </div>
             ))}
@@ -251,10 +252,10 @@ export default function RightPanel({ entry, onClose, onDelete }) {
                   </div>
                   <div className={styles.timelineMeta}>
                     {fmtDateTime(evt.timestamp)}
-                    {evt.user && <> · {evt.user}</>}
+                    {evt.user_name && <> · {evt.user_name}</>}
                   </div>
-                  {evt.note && (
-                    <div className={styles.timelineNote}>{evt.note}</div>
+                  {evt.description && (
+                    <div className={styles.timelineNote}>{evt.description}</div>
                   )}
                 </div>
               </li>

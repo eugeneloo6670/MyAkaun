@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../../api/client';
+import api, { getEntries, getCreditors, getCurrentPeriod } from '../../api/client';
 import styles from './Sidebar.module.css';
 
 // ---------------------------------------------------------------------------
@@ -64,20 +64,25 @@ export default function Sidebar({
 
     async function load() {
       try {
-        const [entries, creditors, missing, periodNow] = await Promise.allSettled([
-          api.get('/api/entries/count'),
-          api.get('/api/reports/creditors/count'),
-          api.get('/api/entries/missing-docs/count'),
-          api.get('/api/periods/current'),
+        const [entriesRes, creditorsRes, periodRes] = await Promise.allSettled([
+          getEntries(),
+          getCreditors(),
+          getCurrentPeriod(),
         ]);
         if (cancelled) return;
+
+        // Derive counts client-side from full lists
+        const entries = entriesRes.status === 'fulfilled' ? (entriesRes.value.data || []) : [];
+        const creditors = creditorsRes.status === 'fulfilled' ? (creditorsRes.value.data || []) : [];
+        const missingDocs = entries.filter((e) => !e.doc_ref).length;
+
         setCounts({
-          entries:      entries.status      === 'fulfilled' ? entries.value.data?.count      : null,
-          creditors:    creditors.status    === 'fulfilled' ? creditors.value.data?.count    : null,
-          missing_docs: missing.status      === 'fulfilled' ? missing.value.data?.count      : null,
+          entries: entries.length,
+          creditors: creditors.length,
+          missing_docs: missingDocs,
         });
-        if (periodNow.status === 'fulfilled') {
-          setCurrentPeriod(periodNow.value.data || null);
+        if (periodRes.status === 'fulfilled') {
+          setCurrentPeriod(periodRes.value.data || null);
         }
       } catch {
         /* non-fatal */

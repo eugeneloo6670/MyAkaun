@@ -23,7 +23,7 @@ evolved into a full audit-trail system with Hermes AI integration.
 - Aged payables: 0–30d, 31–60d, 61–90d, 90d+ buckets
 
 ### v3 — Audit trail
-- Transaction IDs: TXN-XXXXXX format
+- Transaction IDs: TXN-XXXXXX format (stored on backend as `short_id`)
 - Kanban board: Purchases | Credit notes | Payments | Discounts columns
 - Transaction linkage map: bidirectional links (credit notes → original purchases)
 - Audit log: immutable timestamped CREATE/DELETE/LOCK/UNLOCK events
@@ -44,7 +44,7 @@ evolved into a full audit-trail system with Hermes AI integration.
 - Periods tab: shows open/locked status, missing doc count, lock/unlock form
 
 ### v5 — Desktop shell UI
-- Three-column layout: left nav (180px) | main content | right detail panel (240–280px)
+- Three-column layout: left nav (180px) | main content | right detail panel (280px)
 - Right panel shows full entry detail on click:
   - Document status alert (red if missing)
   - All fields including FX details
@@ -54,154 +54,154 @@ evolved into a full audit-trail system with Hermes AI integration.
 - Hermes chat bar at bottom of main panel (persistent)
 - Live streaming response from Hermes agent
 
-### v6 (current) — Frontend component build-out
+### v6 — Frontend AP component build-out
 Built as proper modular React components matching v5 spec. All use plain CSS
 modules with consistent design tokens (cool neutrals, teal accent, amber for
 warnings, red for missing docs / overdue).
 
-**Files added under `frontend/src/components/`:**
+Files under `frontend/src/components/`:
+- RecordForm/ — entry form (Purchase | Credit Note | Return | Payment)
+- Sidebar/ — 180px left rail with live counts and period chip
+- Ledger/ — entry table with filters, metrics, CSV export
+- Creditors/ — AP aging buckets with expandable per-supplier drawer
+- RightPanel/ — 280px detail panel with FX, linked TXNs, audit timeline
 
-- **RecordForm/** — entry form, four type buttons (Purchase / Credit Note / Return / Payment)
-  - Supplier autocomplete with last-GL + last-currency memory
-  - Period lock detection on date change → disables form
-  - Linked-TXN dropdown for Credit Note / Return → auto-fills GL + SST + FX
-  - FX block: original amount + currency + rate → live MYR calc
-  - Payment type: live balance fetch + auto settlement discount → GL 4200
-  - Overpayment warning when amount_paid > balance
-  - Doc ref enforced when settlement discount applies
-  - Strict validation, inline error messages, success/error toast
-  - Calls `onRecorded(entry)` prop on success for parent refresh
+### v7 (current) — Backend alignment + integration
+The v6 components were initially written against an assumed API contract that
+did not match the real backend. Session 3 (this one) reconciled the two:
 
-- **Sidebar/** — 180px left rail
-  - 4 nav sections: Entry, Ledger, Period, Audit
-  - Live counts polled every 60s: entries, creditors, missing docs (red badge)
-  - Current period chip at footer (month + open/locked status)
-  - User avatar + role at bottom
-  - Calls `onNavigate(viewId)` prop
+**Backend additions** (small, non-breaking):
+- `/api/periods/current` — returns current month's period status
+- `/api/entries/audit-log/all?short_id=X` — added `short_id` filter
+- `/api/entries/?linked_to=X` — added `linked_to` filter for linked transactions
 
-- **Ledger/** — entry table with filters
-  - Filters: free-text search, type, GL code, date range, doc status
-  - Metrics row: entries shown, total debit, total credit, missing docs
-  - Sortable columns, pagination (50/page)
-  - CSV export client-side
-  - Row click → calls `onSelectEntry(entry)` for RightPanel
-  - Visual badges per entry type, red amount for negatives, FX line under amount
+**Component patches** (substantial):
+- All five v6 components switched from `import { api }` to `import api`
+  (named to default import, since client.js exports `api` as default)
+- All references to `txn_id` → `short_id` (real backend field name)
+- All references to `amount_myr` → `total` (real backend field)
+- All references to `fx_currency`/`fx_original` → `orig_ccy`/`orig_amount`
+- All references to `amount_paid` → `paid`, `discount_amount` → `discount_received`
+- Aging keys: flat `aging_X_X` → nested `aged.{current, d30, d60, d90plus}`
+- RecordForm: "Credit Note" UI button now maps to backend `type=return`
+  (backend only supports purchase|return|payment; functionally identical reversal)
+- RecordForm: GL `gl_name` derived client-side from `gl_code` lookup
+- RecordForm: SST split derived as `net = gross / (1 + rate)`; sends `amount`,
+  `sst_amount`, and `total` correctly
+- RecordForm: payment_method goes into `description` (backend has no dedicated field)
+- Sidebar: count endpoints don't exist; counts derived client-side from lists
+- Ledger: backend supports limited filters (month, supplier, type, missing_docs);
+  date range, GL filter, doc_status=filed, and free-text search done client-side
+- Ledger: pagination done client-side (slice on filtered list)
+- Creditors: `/api/reports/creditors?supplier=X` filter unsupported; fetch all
+  and filter client-side
+- RecordForm: added `prefill` prop. When `{action: 'pay', supplier}` is passed,
+  starts in payment mode with supplier pre-filled (used by Creditors → Pay flow)
 
-- **Creditors/** — AP aging report
-  - Total payable + four bucket cards (0–30 / 31–60 / 61–90 / 90+ d)
-  - Overdue buckets (61–90, 90+) styled red
-  - Sort: balance desc/asc, supplier name, oldest first
-  - Click row → expand drawer showing last 10 entries for that supplier
-  - "Pay" button on each row → calls `onSelectSupplier({supplier, balance, action: 'pay'})`
-    Parent should switch view to RecordForm with payment type pre-selected
-  - Red left border on rows with 61+ day balances
+**Frontend stubs added** so `npm run dev` doesn't error:
+- ComingSoon.jsx — shared placeholder
+- MonthEnd.jsx, KanbanTrail.jsx, AuditLog.jsx, Periods.jsx — all stub-only,
+  point to their target backend endpoints, ready for future build-out
 
-- **RightPanel/** — 280px right rail (widened from 240px for FX detail readability)
-  - Empty state when no entry selected
-  - TXN-ID chip + entry type heading
-  - Red doc-missing alert at top
-  - Large amount display + FX breakdown
-  - Field list: date, supplier, ref, GL, SST, method, discount, doc, recorded by
-  - Linked transactions section (chips with TXN, type, amount)
-  - Audit timeline with colored dots (CREATE=teal, DELETE=red, LOCK=amber)
-  - "Void entry" action button at footer (creates reversing entry, original retained)
+**Shell.jsx rewritten** to:
+- Use v6 component prop names (`onNavigate`, `refreshTrigger`, `onSelectEntry`,
+  `onSelectSupplier`)
+- Handle the Creditors → Pay flow by storing `paymentPrefill` state
+- Mount HermesChatBar in the middle column at the bottom
+- Use 180/1fr/280 grid columns
 
 ## Architecture
 
-### Backend (FastAPI + Python) — unchanged
+### Backend (FastAPI + Python)
 - main.py — app entry, CORS, router registration
 - database.py — SQLAlchemy, SQLite (dev) / PostgreSQL (prod)
 - models/entry.py — Entry, AuditLog, Period, SupplierMemory
 - routers/entries.py — CRUD with audit logging, supplier memory
+  - new query params: `linked_to`, `short_id` (on audit-log endpoint)
 - routers/periods.py — lock/unlock with audit
+  - new endpoint: `GET /current`
 - routers/reports.py — month-end, creditors, aged payables
 - routers/hermes.py — chat endpoint + nightly log receiver
 - services/hermes_bridge.py — streams from Hermes gateway
 - mcp_serve.py — MCP server exposing accounting as tools
 
 ### Frontend (React + Vite)
-- Shell.jsx — three-column layout, view routing (still needs to be wired to new components — see "Integration TODO" below)
-- HermesChatBar.jsx — streaming chat with Hermes agent
-- api/client.js — axios wrapper
-- components/RecordForm/ — v6 (new)
-- components/Sidebar/ — v6 (new)
-- components/Ledger/ — v6 (new)
-- components/Creditors/ — v6 (new)
-- components/RightPanel/ — v6 (new)
+- Shell.jsx — three-column layout, view routing (v7 wired)
+- HermesChatBar.jsx — streaming chat with Hermes agent (unchanged)
+- api/client.js — axios wrapper; named exports for all endpoints + default `api`
+  - new exports: `getCurrentPeriod`, `getEntry`
+- components/RecordForm/ — v6 + v7 patches
+- components/Sidebar/ — v6 + v7 patches
+- components/Ledger/ — v6 + v7 patches
+- components/Creditors/ — v6 + v7 patches
+- components/RightPanel/ — v6 + v7 patches
+- components/MonthEnd.jsx, KanbanTrail.jsx, AuditLog.jsx, Periods.jsx — stubs
+- components/ComingSoon.jsx — shared stub component
 
 ### Hermes Integration (3 levels) — unchanged
 1. Chat bar → /api/hermes/query → hermes_bridge → streams response
 2. MCP server (port 8001) → Hermes calls record_entry, query_ledger etc autonomously
 3. Cron: nightly-accounting-review skill at 23:00 → WhatsApp summary
 
-## Backend API contract assumed by v6 frontend
-
-The new components assume these endpoints exist. If any are missing or
-have a different shape, only the data-fetching `useEffect`s in each component
-need touching — form/render logic is isolated.
+## Backend API contract (REAL, verified against routers/*.py)
 
 ### Entries
-- `GET  /api/entries` — query: `type, gl_code, supplier, date_from, date_to, doc_status, search, limit, offset`. Returns `[entries]` or `{entries, total}`.
-- `GET  /api/entries/count` → `{count: N}`
-- `GET  /api/entries/suppliers` → `[{name, last_gl, last_currency}]`
-- `GET  /api/entries/missing-docs/count` → `{count: N}`
-- `GET  /api/entries/{txn_id}/audit-log` → `[{id, action, timestamp, user, note}]`
-- `GET  /api/entries/{txn_id}/linked` → `[{txn_id, type, amount_myr}]`
-- `POST /api/entries` — body shape varies by type, see RecordForm `buildPayload()`. Returns `{txn_id, ...}`.
+- `GET /api/entries/` — params: `month, supplier, type, missing_docs, linked_to`
+  Returns array of Entry objects
+- `POST /api/entries/` — body: EntryCreate (see entries.py for full Pydantic model)
+- `GET /api/entries/{id}` — get one by integer id
+- `DELETE /api/entries/{id}` — soft-delete (writes audit log)
+- `GET /api/entries/audit-log/all` — params: `action, user, short_id`
+- `GET /api/entries/supplier-memory/all` — returns
+  `[{supplier, last_gl: "5100|Cost of Goods Sold", last_ccy, entry_count, last_seen}]`
 
 ### Reports
-- `GET  /api/reports/creditors` → `[{supplier, balance, aging_0_30, aging_31_60, aging_61_90, aging_90_plus, last_activity}]`
-- `GET  /api/reports/creditors/count` → `{count: N}`
-- `GET  /api/reports/creditors?supplier=X` → single supplier balance (also works for the "current balance" widget in payment entry)
+- `GET /api/reports/creditors` — returns
+  `[{supplier, gross_purchases, returns, payments, discounts, balance,
+     aged: {current, d30, d60, d90plus}, missing_docs, transaction_count}]`
+  Sorted by `abs(balance)` desc. No supplier filter (frontend filters client-side).
+- `GET /api/reports/month-end/{month}` — full GL breakdown
+- `GET /api/reports/aged-payables` — overdue summary
 
 ### Periods
-- `GET  /api/periods/current` → `{month: "2026-05", locked: boolean}`
-- `GET  /api/periods/{YYYY-MM}` → `{locked: boolean}`
+- `GET /api/periods/` — list all
+- `GET /api/periods/current` — current month status (new in v7)
+- `GET /api/periods/{month}/status` — specific month
+- `POST /api/periods/lock` — body: `{month, locked, reason, authorised_by}`
 
-## Integration TODO (next session, ~30 min)
+## Entry data shape (sent on POST, returned on GET)
 
-Shell.jsx needs to wire the new components. Suggested structure:
-
-```jsx
-import Sidebar     from './components/Sidebar';
-import RecordForm  from './components/RecordForm';
-import Ledger      from './components/Ledger';
-import Creditors   from './components/Creditors';
-import RightPanel  from './components/RightPanel';
-import HermesChatBar from './HermesChatBar';
-
-export default function Shell() {
-  const [view, setView] = useState('record');
-  const [selectedEntry, setSelectedEntry] = useState(null);
-  const [refreshTick, setRefreshTick] = useState(0);
-  const [paymentContext, setPaymentContext] = useState(null);
-
-  const bump = () => setRefreshTick(t => t + 1);
-
-  return (
-    <div className="shell">
-      <Sidebar activeView={view} onNavigate={setView} refreshTrigger={refreshTick} />
-      <main className="main">
-        {view === 'record'    && <RecordForm onRecorded={bump} prefill={paymentContext} />}
-        {view === 'ledger'    && <Ledger onSelectEntry={setSelectedEntry} refreshTrigger={refreshTick} />}
-        {view === 'creditors' && <Creditors
-                                    onSelectSupplier={(ctx) => { setPaymentContext(ctx); setView('record'); }}
-                                    onSelectEntry={setSelectedEntry}
-                                    refreshTrigger={refreshTick}
-                                  />}
-        <HermesChatBar />
-      </main>
-      <RightPanel entry={selectedEntry} onClose={() => setSelectedEntry(null)} />
-    </div>
-  );
+```js
+{
+  id: 42,                              // int, auto-increment
+  short_id: "TXN-123456",              // public id, last 6 digits of Unix ms
+  date: "2026-05-18",                  // YYYY-MM-DD
+  month: "2026-05",                    // YYYY-MM (auto-derived from date)
+  type: "purchase",                    // purchase | return | payment
+  supplier: "Asia Trade Centre",
+  reference: "INV-0042",
+  description: null,
+  gl_code: "5100",
+  gl_name: "Cost of Goods Sold",
+  amount: 100.00,                      // net (excl SST)
+  sst_rate: 6,
+  sst_amount: 6.00,
+  total: 106.00,                       // gross — this is what UI shows
+  orig_ccy: "INR",
+  orig_amount: 100000,                 // in original currency
+  fx_rate: 0.04182,
+  doc_ref: "scan-001.pdf",             // or null = missing doc, red flag
+  linked_to: "TXN-001001",             // short_id of original (for returns/CN)
+  recorded_by: "eugene",
+  recorded_at: "...",                  // server-set timestamp
+  // Payment-only fields:
+  paid: null,
+  balance_owed: null,
+  discount_received: null,             // → GL 4200
 }
 ```
 
-Note: `RecordForm` does NOT currently accept a `prefill` prop. To support
-the "Pay supplier" flow from Creditors, add a `prefill` prop that pre-selects
-type=payment and pre-fills supplier. ~10 lines.
-
-## Key Business Logic — unchanged
+## Key Business Logic
 
 ### Settlement Discount
 When supplier accepts less than full balance:
@@ -209,12 +209,11 @@ When supplier accepts less than full balance:
   → GL 4200 (income), NOT a reduction in purchase cost
   Requires supplier written confirmation as supporting document.
 
-### Credit Note vs Return
-Kept as separate buttons per user decision. Functionally identical
-(both negative-amount entries linked to original). Distinction is for
-audit clarity:
-- Return = goods physically sent back (supplier issues CN as evidence)
-- Credit Note = balance reduction without goods movement (price, rebate, damage)
+### Credit Note vs Return (UI vs backend)
+- UI shows 4 buttons: Purchase | Credit Note | Return | Payment
+- Backend has 3 types: purchase | return | payment
+- "Credit Note" UI button maps to backend `type=return` on submit
+- Same backend handling; distinction is purely for UX clarity in the form
 
 ### Indian Lakh Notation
 1,00,000 = 100,000 (not 1 million)
@@ -233,26 +232,64 @@ TXN-001004: Payment INR 1,35,000 → MYR 5,647.70 + discount MYR 209.10 (GL 4200
 
 ## What Needs Building Next (priority order)
 
-### High priority
-- [ ] Shell.jsx — wire all v6 components (Integration TODO above)
-- [ ] RecordForm `prefill` prop — accept `{supplier, balance, action}` for Creditors → Pay flow
-- [ ] Backend endpoints check — verify the contract above matches reality, fix any mismatches
-- [ ] KanbanTrail.jsx — paper-trail kanban (Purchases | CN | Payments | Discounts columns)
+### Cleanup
+- [ ] **Delete `hermes-accounting/` folder at repo root** — it's a duplicate of
+  the entire project from before files were moved up one level. Confuses readers;
+  contains outdated copies of README, SETUP, HANDOFF, and all backend/frontend.
+
+### High priority — get the app actually running
+- [ ] Run `npm install && npm run dev` in frontend/ — verify build succeeds
+- [ ] Start backend with `uvicorn main:app --reload` in backend/
+- [ ] Smoke-test: create one purchase, view in ledger, view detail in right panel
+- [ ] Fix anything that breaks on first run (likely styling clashes between
+  v6 CSS modules and the existing CSS variable scheme used by HermesChatBar)
+
+### Build out remaining views (currently stubs)
+- [ ] **KanbanTrail.jsx** — paper-trail kanban (Purchases | CN/Return | Payments
+  | Discounts columns). Wire to `getEntries()`.
+- [ ] **MonthEnd.jsx** — GL breakdown per period, wired to
+  `/api/reports/month-end/{month}`. Include month selector.
+- [ ] **AuditLog.jsx** — append-only log view, amber for period events,
+  CSV export. Wired to `getAuditLog()`.
+- [ ] **Periods.jsx** — lock/unlock UI with confirmation modal. Wired to
+  `getPeriods()` + `setPeriodLock()`.
 
 ### Medium priority
-- [ ] MonthEnd.jsx — GL breakdown per period, wired to `/api/reports/month-end/{month}`
-- [ ] AuditLog.jsx — append-only log view, amber for period events, CSV export
-- [ ] Periods.jsx — lock/unlock UI with confirmation modal
+- [ ] Maker/checker approval workflow — adds `status` column
+  (draft → pending_approval → posted → voided) + second user role.
+  Requires backend schema migration.
+- [ ] Document upload — base64 image storage OR S3 presigned URLs; OCR via Hermes
+- [ ] Void entry action — currently RightPanel has the button but no handler
 
 ### Lower priority / future workstreams
-- [ ] Document upload — base64 image storage OR S3 presigned URLs; OCR via Hermes
-- [ ] Maker/checker approval workflow — adds `status` column (draft → pending_approval → posted → voided) + second user role
 - [ ] LHDN e-invoice skill — `hermes/skills/lhdn-einvoicing/SKILL.md`
 - [ ] SST treatment skill — `hermes/skills/sst-treatment/SKILL.md`
 - [ ] PDF audit report generation
-- [ ] AR module (separate session): sales invoices, customer receipts, debtors, GL 1200/4100/4300
+- [ ] AR module (separate session): sales invoices, customer receipts, debtors,
+  GL 1200/4100/4300
 - [ ] Multi-tenant support (per-company database separation)
 - [ ] AI-powered chart of accounts customization per client
+
+## Known Caveats (read before debugging)
+
+1. **Field name asymmetry**: backend uses `short_id`/`total`/`orig_ccy`/`orig_amount`;
+   if a component bug surfaces, this is the first place to look. The v7 patches
+   should have caught all of these but spot any with grep:
+   `grep -rE "txn_id|amount_myr|fx_currency|fx_original" frontend/src/components/`
+
+2. **The frontend's "Credit Note" type is virtual** — backend never sees it; UI
+   maps it to `type=return` before submit. If you add a 5th button, decide
+   whether the backend needs a real new type or another virtual mapping.
+
+3. **Backend `creditors` endpoint returns ALL suppliers, even fully-settled ones**
+   (balance = 0). Creditors.jsx filters these out client-side. If you change
+   that filter, also update the count shown in Sidebar.
+
+4. **Period locking is enforced at POST time** by the backend
+   (HTTPException 400 if locked). The frontend's pre-check is a UX nicety;
+   never assume it's the only protection.
+
+5. **No write tests anywhere yet.** First thing to add when the app runs.
 
 ## Malaysian Context — unchanged
 - LHDN e-Invoice required for businesses above RM 150k turnover
@@ -269,7 +306,8 @@ TXN-001004: Payment INR 1,35,000 → MYR 5,647.70 + discount MYR 209.10 (GL 4200
 
 ## Design System Notes (for v6+ components)
 
-Consistent CSS variables across all v6 components:
+Consistent CSS variables across all v6 components (scoped via CSS modules,
+do NOT leak to global scope):
 
 ```css
 --bg: #fafbfc;            /* page background */
@@ -288,6 +326,11 @@ Consistent CSS variables across all v6 components:
 --green: #166534;         /* docs filed */
 ```
 
+HermesChatBar.jsx uses a different scheme (`var(--color-text-primary)` etc).
+At some point the two should align — either give v6 components access to the
+same global variables, or migrate HermesChatBar to the new scheme. Not urgent;
+not broken.
+
 Typography: native system stack (-apple-system, Segoe UI, etc).
 Numeric columns: `font-variant-numeric: tabular-nums`.
 Code/IDs: `"SF Mono", Menlo, Consolas, monospace`.
@@ -297,5 +340,20 @@ This is an audit tool — restraint signals trustworthiness.
 
 ## Session Log
 
-- 2026-05-17 (session 1): RecordForm.jsx + module.css built. Backend assumed complete per v5.
-- 2026-05-18 (session 2): Sidebar, Ledger, Creditors, RightPanel all built. HANDOFF.md updated. Files staged in `/mnt/user-data/outputs/frontend/src/components/` for upload to GitHub repo.
+- 2026-05-17 (session 1): RecordForm.jsx + module.css built. Backend assumed
+  complete per v5.
+- 2026-05-18 (session 2): Sidebar, Ledger, Creditors, RightPanel all built.
+  HANDOFF.md updated. Files uploaded to GitHub.
+- 2026-05-18 (session 3, this one): Filesystem MCP access set up. Discovered
+  v6 components were written against an assumed API contract that didn't match
+  reality. Patched:
+  - Backend: 3 small additions (linked_to filter, short_id filter,
+    /periods/current endpoint)
+  - Frontend: all 5 v6 components rewritten to use real backend field names
+    and endpoints, plus client.js helpers
+  - Added stubs for MonthEnd / KanbanTrail / AuditLog / Periods so app can build
+  - Rewrote Shell.jsx to wire everything together
+  - Added `prefill` prop to RecordForm for Creditors → Pay flow
+  - All files validated for JSX/Python syntax. App should now run on
+    `npm run dev`, modulo whatever runtime issues a first-time test surfaces.
+  - **Pending manual action: delete `hermes-accounting/` duplicate folder.**

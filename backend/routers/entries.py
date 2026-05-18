@@ -113,6 +113,7 @@ def list_entries(
     supplier: Optional[str] = None,
     type: Optional[str] = None,
     missing_docs: Optional[bool] = None,
+    linked_to: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     q = db.query(Entry)
@@ -124,6 +125,8 @@ def list_entries(
         q = q.filter(Entry.type == type)
     if missing_docs:
         q = q.filter(Entry.doc_ref == None)
+    if linked_to:
+        q = q.filter(Entry.linked_to == linked_to)
     return q.order_by(Entry.date.desc()).all()
 
 
@@ -154,6 +157,7 @@ def delete_entry(entry_id: int, deleted_by: str = "System", db: Session = Depend
 def get_audit_log(
     action: Optional[str] = None,
     user: Optional[str] = None,
+    short_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     q = db.query(AuditLog)
@@ -161,6 +165,8 @@ def get_audit_log(
         q = q.filter(AuditLog.action == action)
     if user:
         q = q.filter(AuditLog.user_name == user)
+    if short_id:
+        q = q.filter(AuditLog.short_id == short_id)
     return q.order_by(AuditLog.timestamp.desc()).all()
 
 
