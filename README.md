@@ -51,10 +51,11 @@ Indian lakh notation: 1,00,000 = 100,000
 | 2 | Return | 10,000 | 418.20 |
 | 3 | Further purchase | 50,000 | 2,091.00 |
 | — | Balance owed | 1,40,000 | 5,854.80 |
-| 4 | Cheque paid | 1,35,000 | 5,647.70 |
+| 4 | Cheque paid | 1,35,000 | 5,645.70 |
 | — | Discount received | 5,000 | 209.10 |
 
 Discount received → GL 4200 (income), not a purchase reduction.
+Final balance: 5,854.80 − 5,645.70 − 209.10 = 0.00 ✅
 
 ## Malaysian Regulatory Context
 

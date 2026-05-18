@@ -10,6 +10,10 @@ export const getEntries = (params = {}) => api.get("/api/entries/", { params })
 export const createEntry = (data) => api.post("/api/entries/", data)
 export const deleteEntry = (id, deleted_by = "User") =>
   api.delete(`/api/entries/${id}`, { params: { deleted_by } })
+
+// Soft-void an entry (preferred over delete). Pass { voided_by, reason? }.
+export const voidEntry = (id, payload) =>
+  api.post(`/api/entries/${id}/void`, payload)
 export const getAuditLog = (params = {}) => api.get("/api/entries/audit-log/all", { params })
 export const getSupplierMemory = () => api.get("/api/entries/supplier-memory/all")
 

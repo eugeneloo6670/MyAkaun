@@ -221,9 +221,15 @@ When supplier accepts less than full balance:
 
 ### Asia Trade Centre Demo (INR→MYR @ 0.04182)
 TXN-001001: Purchase INR 1,00,000 → MYR 4,182.00 (GL 5100)
-TXN-001002: Return INR 10,000 → MYR 418.20 (GL 5100, links to TXN-001001)
-TXN-001003: Purchase INR 50,000 → MYR 2,091.00 (GL 5100, NO DOC - intentional)
-TXN-001004: Payment INR 1,35,000 → MYR 5,647.70 + discount MYR 209.10 (GL 4200)
+TXN-001002: Return   INR 10,000   → MYR   418.20 (GL 5100, links to TXN-001001)
+TXN-001003: Purchase INR 50,000   → MYR 2,091.00 (GL 5100, NO DOC - intentional)
+TXN-001004: Payment  INR 1,35,000 → MYR 5,645.70 + discount MYR 209.10 (GL 4200)
+
+Arithmetic check (Codex review confirmed):
+  Gross purchases:  4,182.00 + 2,091.00 = 6,273.00
+  Returns:                              −  418.20
+  Outstanding:                            5,854.80
+  Payment + discount: 5,645.70 + 209.10 = 5,854.80   ✅ balance closes to 0
 
 ### GL Codes
 2100 Accounts Payable | 4200 Discount Received (income)
@@ -357,3 +363,78 @@ This is an audit tool — restraint signals trustworthiness.
   - All files validated for JSX/Python syntax. App should now run on
     `npm run dev`, modulo whatever runtime issues a first-time test surfaces.
   - **Pending manual action: delete `hermes-accounting/` duplicate folder.**
+
+- 2026-05-18 (session 4): First successful runtime. Discovered
+  `declarative_base()` was called twice (database.py and entry.py creating
+  separate Bases) which meant `Base.metadata.create_all()` never registered
+  the Entry/AuditLog/Period/SupplierMemory tables. Fixed by importing Base
+  from database.py in entry.py. Also created `index.html`, `src/main.jsx`,
+  `src/index.css`, and `vite.config.js` (none existed; Vite couldn't find
+  an entry point). Discovered the hard-delete vs soft-delete mismatch in
+  Codex review but session ended before fix.
+  Also deleted the duplicate `hermes-accounting/` folder.
+
+- 2026-05-18 (session 5): Codex code review applied. Critical and
+  Important fixes landed.
+
+  **Critical**
+  - Hard delete → soft delete via status column. New endpoint
+    `POST /api/entries/{id}/void` accepts `{voided_by, reason?}`. The Entry
+    table gained `status` ("posted" | "voided"; "draft" reserved for future
+    maker/checker), `voided_by`, `voided_at`, `void_reason`. `DELETE
+    /api/entries/{id}` now returns 405. All reports filter `status != "voided"`
+    by default. `list_entries` accepts `include_voided=true` for audit views.
+    RightPanel shows a void banner and hides the void button on voided rows.
+
+  **Important — accounting integrity**
+  - Server-side type/sign/linkage validation: `EntryCreate.type` is now
+    `Literal["purchase", "return", "payment"]`. New `validate_entry_invariants`
+    enforces: purchase total > 0, requires gl_code, no linked_to; return total
+    < 0, requires linked_to pointing to a non-voided same-supplier purchase;
+    payment requires `paid > 0` and explicit `balance_owed`; discount cannot be
+    negative, cannot exceed balance, paid+discount cannot exceed balance.
+  - Payment-balance race fix: RecordForm tracks `balanceState`
+    (idle/loading/loaded/failed). Submit is blocked unless balanceState ===
+    'loaded'. `buildPayload` throws if called for a payment without a loaded
+    balance — defense in depth.
+  - SST input label changed to "Amount incl. SST (MYR)" to remove gross-vs-net
+    ambiguity.
+  - Asia Trade Centre demo: arithmetic corrected from 5,647.70 to 5,645.70 in
+    HANDOFF.md and README.md. Code unchanged (documentation bug only).
+
+  **Important — UX**
+  - RightPanel `payment_method` display: derived from `description`
+    ("Payment via cheque" → "cheque"). Field was previously read from a
+    non-existent `entry.payment_method` and never displayed.
+  - RightPanel linked entries: now bidirectional. Fetches both children
+    (entries that link TO this one) and parent (the entry this one links TO).
+  - RightPanel audit timeline now recognises `VOID` action with red dot.
+  - Updated RightPanel hint text so it no longer claims voiding creates a
+    reversing entry (it doesn't, in this implementation).
+
+  **Deferred to next focused session** — see Codex review TODOs below.
+
+## Codex review TODOs (remaining)
+
+From the merged Claude + Codex review. Approximate priority:
+
+1. **Float → Decimal** for monetary fields. Single-session focused job;
+   requires Alembic migration and JSON serialization verification.
+2. **Server-side count endpoints + drop Sidebar full-list polling.** High
+   payoff, ~30 min.
+3. **Auth design.** Bearer-token API key for the FastAPI app. Bind
+   `mcp_serve.py` to 127.0.0.1 by default. Once auth lands, derive
+   `recorded_by` / `voided_by` / `authorised_by` from auth context.
+4. **Audit log DB triggers** preventing UPDATE/DELETE on `audit_log`.
+5. **Idempotency keys** on `POST /api/entries/`.
+6. **Aged buckets account for settlements** (currently age gross purchases
+   only; should age outstanding balances).
+7. **MCP server `ACCOUNTING_API` env var** (currently hardcoded; breaks in
+   docker-compose).
+8. **ULID-style short_id** to avoid collision under burst inserts.
+9. **Malaysia timezone** for `get_current_period` (currently UTC).
+10. **FX metadata fields** (`rate_source`, `rate_locked_at`).
+11. **Reversing-entry pattern** as the long-term upgrade for void. The status
+    column landed in v8 is the pragmatic version; the proper accounting pattern
+    creates a counter-entry and flags both as voided. RightPanel copy has been
+    updated to match current behaviour so the UI no longer lies about it.
