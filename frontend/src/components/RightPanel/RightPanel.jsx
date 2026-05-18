@@ -33,6 +33,15 @@ const fmtDateTime = (s) => {
 
 const fmtDate = (s) => (s ? s.slice(0, 10) : '—');
 
+// Extract a human payment method from the description text written by RecordForm.
+// Format produced by RecordForm: "Payment via cheque" / "Payment via bank transfer" / "Payment via cash".
+// Returns null when nothing matches.
+const paymentMethodFromDescription = (desc) => {
+  if (!desc || typeof desc !== 'string') return null;
+  const m = desc.match(/payment via\s+(.+)/i);
+  return m ? m[1].trim() : null;
+};
+
 const typeLabel = (t) => {
   switch (t) {
     case 'purchase':    return 'Purchase';
@@ -46,7 +55,8 @@ const typeLabel = (t) => {
 const auditActionLabel = (action) => {
   switch (action) {
     case 'CREATE':      return 'Created';
-    case 'DELETE':      return 'Deleted';
+    case 'VOID':        return 'Voided';
+    case 'DELETE':      return 'Deleted (legacy)';
     case 'LOCK':        return 'Period locked';
     case 'UNLOCK':      return 'Period unlocked';
     case 'UPDATE':      return 'Updated';
@@ -58,6 +68,7 @@ const auditActionLabel = (action) => {
 const auditClass = (action, styles) => {
   switch (action) {
     case 'CREATE':      return styles.auditCreate;
+    case 'VOID':        return styles.auditDelete;
     case 'DELETE':      return styles.auditDelete;
     case 'LOCK':        return styles.auditLock;
     case 'UNLOCK':      return styles.auditUnlock;
@@ -85,30 +96,51 @@ export default function RightPanel({ entry, onClose, onDelete }) {
     let cancelled = false;
     setLoadingAudit(true);
 
+    // Linked entries are bidirectional:
+    //   - children: any entry whose linked_to == this.short_id (returns/credit notes)
+    //   - parent:   the entry this.linked_to points to (if any)
+    const linkedFetches = [getEntries({ linked_to: entry.short_id })];
+    if (entry.linked_to) {
+      // Backend doesn't expose a short_id filter on entries list; fall back to fetching
+      // the supplier's entries and finding the one with matching short_id client-side.
+      linkedFetches.push(getEntries({ supplier: entry.supplier }));
+    }
+
     Promise.allSettled([
       getAuditLog({ short_id: entry.short_id }),
-      // Linked entries: find any entry that links TO this one, OR the one this entry links TO
-      getEntries({ linked_to: entry.short_id }),
-    ]).then(([auditRes, linkedRes]) => {
+      ...linkedFetches,
+    ]).then((results) => {
       if (cancelled) return;
+      const [auditRes, childrenRes, parentSupplierRes] = results;
+
       if (auditRes.status === 'fulfilled') {
         const data = auditRes.value.data;
         setAuditTrail(Array.isArray(data) ? data : []);
       } else {
         setAuditTrail([]);
       }
-      if (linkedRes.status === 'fulfilled') {
-        const data = linkedRes.value.data;
-        setLinkedEntries(Array.isArray(data) ? data : []);
-      } else {
-        setLinkedEntries([]);
+
+      const linked = [];
+      if (childrenRes && childrenRes.status === 'fulfilled') {
+        const data = childrenRes.value.data;
+        if (Array.isArray(data)) linked.push(...data);
       }
+      if (entry.linked_to && parentSupplierRes && parentSupplierRes.status === 'fulfilled') {
+        const data = parentSupplierRes.value.data;
+        const parent = Array.isArray(data)
+          ? data.find((e) => e.short_id === entry.linked_to)
+          : null;
+        if (parent && !linked.some((l) => l.short_id === parent.short_id)) {
+          linked.unshift(parent); // Parent first (it's the originating entry).
+        }
+      }
+      setLinkedEntries(linked);
     }).finally(() => {
       if (!cancelled) setLoadingAudit(false);
     });
 
     return () => { cancelled = true; };
-  }, [entry?.short_id]);
+  }, [entry?.short_id, entry?.linked_to, entry?.supplier]);
 
   // -------------------------------------------------------------------------
   // Empty state
@@ -151,9 +183,16 @@ export default function RightPanel({ entry, onClose, onDelete }) {
       </header>
 
       {/* Doc status alert */}
-      {!entry.doc_ref && (
+      {!entry.doc_ref && entry.status !== 'voided' && (
         <div className={styles.docAlert}>
           🔴 No supporting document on file. This entry is flagged in audit reports.
+        </div>
+      )}
+      {entry.status === 'voided' && (
+        <div className={styles.docAlert}>
+          ⊘ This entry is voided. It is excluded from all reports.
+          {entry.voided_by && <> Voided by <strong>{entry.voided_by}</strong>.</>}
+          {entry.void_reason && <div style={{ marginTop: 6, fontStyle: 'italic' }}>{entry.void_reason}</div>}
         </div>
       )}
 
@@ -190,8 +229,8 @@ export default function RightPanel({ entry, onClose, onDelete }) {
         {entry.sst_rate !== undefined && entry.sst_rate !== null && (
           <FieldRow label="SST">{entry.sst_rate}%</FieldRow>
         )}
-        {entry.payment_method && (
-          <FieldRow label="Method">{entry.payment_method.replace('_', ' ')}</FieldRow>
+        {paymentMethodFromDescription(entry.description) && (
+          <FieldRow label="Method">{paymentMethodFromDescription(entry.description)}</FieldRow>
         )}
         {entry.discount_received > 0 && (
           <FieldRow label="Discount taken">
@@ -265,7 +304,7 @@ export default function RightPanel({ entry, onClose, onDelete }) {
       </section>
 
       {/* Actions */}
-      {onDelete && (
+      {onDelete && entry.status !== 'voided' && (
         <div className={styles.actionFooter}>
           <button
             type="button"
@@ -275,7 +314,9 @@ export default function RightPanel({ entry, onClose, onDelete }) {
             Void entry
           </button>
           <div className={styles.actionHint}>
-            Voiding creates a reversing entry. Original record is retained for audit.
+            Voiding marks this entry as inactive. The original row is retained for
+            audit and excluded from reports. To reverse a posted purchase, record a
+            Return or Credit Note instead.
           </div>
         </div>
       )}

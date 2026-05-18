@@ -88,6 +88,9 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
   const [suppliers, setSuppliers] = useState([]);
   const [supplierMemory, setSupplierMemory] = useState({}); // supplier -> { last_gl, last_currency }
   const [supplierBalance, setSupplierBalance] = useState(null);
+  // 'idle' before fetch starts, 'loading' while in flight, 'loaded' on success, 'failed' on error.
+  // Used to block payment submission until balance is known (Codex Important #2 / merged Fix 4).
+  const [balanceState, setBalanceState] = useState('idle');
   const [linkableEntries, setLinkableEntries] = useState([]);
   const [periodLocked, setPeriodLocked] = useState(false);
   const [errors, setErrors] = useState({});
@@ -143,9 +146,11 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
   useEffect(() => {
     if (!isPayment || !form.supplier) {
       setSupplierBalance(null);
+      setBalanceState('idle');
       return;
     }
     let cancelled = false;
+    setBalanceState('loading');
     // Backend doesn't support ?supplier=X filter on creditors — fetch all, filter client-side
     getCreditors()
       .then((res) => {
@@ -153,8 +158,13 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
         const list = Array.isArray(res.data) ? res.data : [];
         const found = list.find((c) => c.supplier === form.supplier);
         setSupplierBalance(found ? Number(found.balance) : 0);
+        setBalanceState('loaded');
       })
-      .catch(() => { if (!cancelled) setSupplierBalance(null); });
+      .catch(() => {
+        if (cancelled) return;
+        setSupplierBalance(null);
+        setBalanceState('failed');
+      });
     return () => { cancelled = true; };
   }, [isPayment, form.supplier]);
 
@@ -257,6 +267,14 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
       if (!form.amount_paid || parseFloat(form.amount_paid) <= 0) {
         e.amount_paid = 'Must be positive';
       }
+      // Block submit until balance is loaded (Codex Important #2).
+      // We refuse to default to 0 silently — if the user really wants to pay against a 0 balance,
+      // they need to wait for the load to confirm 0, not let a failed load become 0.
+      if (balanceState !== 'loaded') {
+        e.amount_paid = balanceState === 'failed'
+          ? 'Cannot record payment — supplier balance could not be loaded. Retry.'
+          : 'Waiting for supplier balance to load…';
+      }
       // Settlement discount requires supporting doc per handoff
       if (paymentDiscount?.discount > 0 && !form.doc_ref?.trim()) {
         e.doc_ref = 'Required when settlement discount applies';
@@ -264,7 +282,7 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
     }
 
     return e;
-  }, [form, isPurchase, isReversal, isPayment, paymentDiscount]);
+  }, [form, isPurchase, isReversal, isPayment, paymentDiscount, balanceState]);
 
   // -------------------------------------------------------------------------
   // Handlers
@@ -463,7 +481,7 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
               </Field>
 
               {!form.fx_enabled && (
-                <Field label="Amount (MYR)" error={errors.amount} className={styles.fullRow}>
+                <Field label="Amount incl. SST (MYR)" error={errors.amount} className={styles.fullRow}>
                   <input
                     type="number"
                     step="0.01"
@@ -725,7 +743,13 @@ function buildPayload(form, ctx) {
     base.gl_code = '2100';
     base.gl_name = 'Accounts Payable';
     base.paid = parseFloat(form.amount_paid);
-    base.balance_owed = supplierBalance ?? 0;
+    // Caller MUST have set supplierBalance via a successful load. Validation in
+    // handleSubmit blocks this path otherwise, but we defend in depth: refuse to
+    // default to 0, because a silent 0 would hide the bug.
+    if (typeof supplierBalance !== 'number') {
+      throw new Error('buildPayload called for payment without a loaded supplierBalance');
+    }
+    base.balance_owed = supplierBalance;
     base.total = base.paid;  // total = amount of cash out
     base.amount = base.paid;
     if (paymentDiscount?.discount > 0) {

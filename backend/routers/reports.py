@@ -10,7 +10,11 @@ router = APIRouter()
 
 @router.get("/month-end/{month}")
 def month_end_report(month: str, db: Session = Depends(get_db)):
-    entries = db.query(Entry).filter(Entry.month == month).all()
+    # Voided entries must not affect month-end totals.
+    entries = db.query(Entry).filter(
+        Entry.month == month,
+        Entry.status != "voided",
+    ).all()
     if not entries:
         return {"month": month, "entries": 0}
 
@@ -59,12 +63,22 @@ def month_end_report(month: str, db: Session = Depends(get_db)):
 
 @router.get("/creditors")
 def creditors_report(db: Session = Depends(get_db)):
-    suppliers = db.query(Entry.supplier).distinct().all()
+    # Distinct suppliers from non-voided entries only.
+    suppliers = (
+        db.query(Entry.supplier)
+        .filter(Entry.status != "voided")
+        .distinct()
+        .all()
+    )
     result = []
     now = datetime.utcnow()
 
     for (supplier,) in suppliers:
-        entries = db.query(Entry).filter(Entry.supplier == supplier).all()
+        entries = (
+            db.query(Entry)
+            .filter(Entry.supplier == supplier, Entry.status != "voided")
+            .all()
+        )
         purchases  = round(sum(e.total for e in entries if e.type == "purchase"), 2)
         returns    = round(sum(abs(e.total) for e in entries if e.type == "return"), 2)
         payments   = round(sum(e.paid or 0 for e in entries if e.type == "payment"), 2)
