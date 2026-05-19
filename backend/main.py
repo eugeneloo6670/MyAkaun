@@ -1,9 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
+from migrations import run_migrations
 from routers import entries, periods, reports, hermes
 
+# Create any tables that don't exist yet (no-op if they all exist).
 Base.metadata.create_all(bind=engine)
+# Then patch any existing tables that are missing columns added in later versions.
+# This is a lightweight stand-in for proper migrations; see migrations.py.
+run_migrations(engine)
 
 app = FastAPI(
     title="Hermes Accounting API",
