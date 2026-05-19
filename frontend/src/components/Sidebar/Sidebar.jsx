@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import api, { getEntries, getCreditors, getCurrentPeriod } from '../../api/client';
+import { countEntries, countCreditors, countMissingDocs, getCurrentPeriod } from '../../api/client';
 import styles from './Sidebar.module.css';
 
 // ---------------------------------------------------------------------------
@@ -57,29 +57,28 @@ export default function Sidebar({
   const [counts, setCounts] = useState({});
   const [currentPeriod, setCurrentPeriod] = useState(null);
 
-  // Load counts on mount, when refresh trigger changes, and on poll interval
+  // Load counts on mount, when refresh trigger changes, and on poll interval.
+  // Uses dedicated /count endpoints so the sidebar never pulls full lists just
+  // to render badge numbers (previously fetched all entries + all creditors
+  // every 60s and counted client-side).
   useEffect(() => {
     let cancelled = false;
     let timer;
 
     async function load() {
       try {
-        const [entriesRes, creditorsRes, periodRes] = await Promise.allSettled([
-          getEntries(),
-          getCreditors(),
+        const [entriesRes, creditorsRes, missingRes, periodRes] = await Promise.allSettled([
+          countEntries(),
+          countCreditors(),
+          countMissingDocs(),
           getCurrentPeriod(),
         ]);
         if (cancelled) return;
 
-        // Derive counts client-side from full lists
-        const entries = entriesRes.status === 'fulfilled' ? (entriesRes.value.data || []) : [];
-        const creditors = creditorsRes.status === 'fulfilled' ? (creditorsRes.value.data || []) : [];
-        const missingDocs = entries.filter((e) => !e.doc_ref).length;
-
         setCounts({
-          entries: entries.length,
-          creditors: creditors.length,
-          missing_docs: missingDocs,
+          entries:      entriesRes.status   === 'fulfilled' ? (entriesRes.value.data?.count   ?? 0) : 0,
+          creditors:    creditorsRes.status === 'fulfilled' ? (creditorsRes.value.data?.count ?? 0) : 0,
+          missing_docs: missingRes.status   === 'fulfilled' ? (missingRes.value.data?.count   ?? 0) : 0,
         });
         if (periodRes.status === 'fulfilled') {
           setCurrentPeriod(periodRes.value.data || null);

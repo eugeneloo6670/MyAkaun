@@ -92,6 +92,22 @@ def validate_entry_invariants(payload: EntryCreate, db: Session) -> None:
                     status_code=400,
                     detail="paid + discount_received exceeds balance_owed (overpayment must be handled explicitly)",
                 )
+        else:
+            # No discount supplied: paid must not exceed balance. Overpayments are
+            # not currently modeled — if a real overpayment scenario surfaces
+            # (supplier refund, credit balance), that needs its own design.
+            # Reject here rather than silently accept and produce a negative
+            # creditor balance.
+            if payload.paid > payload.balance_owed + 0.005:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "paid exceeds balance_owed and no discount was specified. "
+                        "If the supplier accepted less than full balance and the "
+                        "difference is a settlement discount, set discount_received. "
+                        "Overpayments are not currently supported."
+                    ),
+                )
 
     # 4. SST sanity (gross >= net).
     if payload.sst_amount and abs(payload.sst_amount) > abs(payload.total):
@@ -205,6 +221,54 @@ def list_entries(
     return q.order_by(Entry.date.desc()).all()
 
 
+@router.get("/count")
+def count_entries(
+    month: Optional[str] = None,
+    supplier: Optional[str] = None,
+    type: Optional[str] = None,
+    missing_docs: Optional[bool] = None,
+    linked_to: Optional[str] = None,
+    status: Optional[str] = None,
+    include_voided: bool = False,
+    db: Session = Depends(get_db)
+):
+    """Return the row count matching the same filters as list_entries.
+
+    Cheap database COUNT(*) instead of returning a full list and counting in
+    the frontend. Used by Sidebar badges.
+    """
+    q = db.query(func.count(Entry.id))
+    if month:
+        q = q.filter(Entry.month == month)
+    if supplier:
+        q = q.filter(Entry.supplier == supplier)
+    if type:
+        q = q.filter(Entry.type == type)
+    if missing_docs:
+        q = q.filter(Entry.doc_ref == None)
+    if linked_to:
+        q = q.filter(Entry.linked_to == linked_to)
+    if status:
+        q = q.filter(Entry.status == status)
+    elif not include_voided:
+        q = q.filter(Entry.status != "voided")
+    return {"count": q.scalar() or 0}
+
+
+@router.get("/missing-docs/count")
+def count_missing_docs(db: Session = Depends(get_db)):
+    """Convenience endpoint for the Sidebar red badge. Counts non-voided
+    entries missing a doc_ref.
+    """
+    count = (
+        db.query(func.count(Entry.id))
+        .filter(Entry.doc_ref == None, Entry.status != "voided")
+        .scalar()
+        or 0
+    )
+    return {"count": count}
+
+
 @router.get("/{entry_id}")
 def get_entry(entry_id: int, db: Session = Depends(get_db)):
     entry = db.query(Entry).filter_by(id=entry_id).first()
@@ -223,6 +287,12 @@ def void_entry(entry_id: int, payload: VoidRequest, db: Session = Depends(get_db
     """Mark an entry as voided. The row is NEVER deleted. All reports and the
     creditors view filter out voided rows. The audit log records the void.
 
+    Voiding a parent purchase that still has non-voided returns/credit notes
+    linked to it would corrupt creditor balances (the parent disappears from
+    reports but the children remain, producing negative balances). We therefore
+    reject voids on entries that have non-voided children, and the user must
+    void the children first.
+
     To restore an entry, an admin-only un-void path would be needed; intentionally
     not exposed here.
     """
@@ -237,6 +307,24 @@ def void_entry(entry_id: int, payload: VoidRequest, db: Session = Depends(get_db
     period = db.query(Period).filter_by(month=entry.month).first()
     if period and period.locked:
         raise HTTPException(status_code=400, detail=f"Period {entry.month} is locked.")
+
+    # Reject if any non-voided child entries link to this one. Voiding a parent
+    # while leaving its returns/payments active would break creditor balances.
+    children = (
+        db.query(Entry)
+        .filter(Entry.linked_to == entry.short_id, Entry.status != "voided")
+        .all()
+    )
+    if children:
+        child_ids = ", ".join(c.short_id for c in children)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot void {entry.short_id}: it has {len(children)} linked "
+                f"non-voided entr{'y' if len(children) == 1 else 'ies'} ({child_ids}). "
+                f"Void the linked entr{'y' if len(children) == 1 else 'ies'} first."
+            ),
+        )
 
     entry.status = "voided"
     entry.voided_by = payload.voided_by

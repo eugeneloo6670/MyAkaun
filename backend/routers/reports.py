@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
 from database import get_db
 from models.entry import Entry
@@ -59,6 +60,22 @@ def month_end_report(month: str, db: Session = Depends(get_db)):
         "gl_breakdown": list(gl_groups.values()),
         "entry_count": len(entries),
     }
+
+
+@router.get("/creditors/count")
+def count_creditors(db: Session = Depends(get_db)):
+    """Count of distinct suppliers with non-voided entries.
+
+    Mirrors the row count of /api/reports/creditors without running the full
+    aggregation. Used by Sidebar badges.
+    """
+    count = (
+        db.query(func.count(func.distinct(Entry.supplier)))
+        .filter(Entry.status != "voided")
+        .scalar()
+        or 0
+    )
+    return {"count": count}
 
 
 @router.get("/creditors")
