@@ -16,9 +16,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Any
-import uvicorn, httpx, json
+import uvicorn, httpx, json, os
 
-ACCOUNTING_API = "http://localhost:8000/api"
+ACCOUNTING_API = os.getenv("ACCOUNTING_API", "http://localhost:8000/api").rstrip("/")
 
 app = FastAPI(title="Hermes Accounting MCP Server")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])

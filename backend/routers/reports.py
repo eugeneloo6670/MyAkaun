@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import case, func
 from typing import Optional
 from database import get_db
 from models.entry import Entry
 from datetime import datetime
 
 router = APIRouter()
+VISIBLE_BALANCE_TOLERANCE = 0.005
 
 
 @router.get("/month-end/{month}")
@@ -43,7 +44,7 @@ def month_end_report(month: str, db: Session = Depends(get_db)):
         gl_groups[key]["total"] = round(gl_groups[key]["total"] + e.total, 2)
         gl_groups[key]["count"] += 1
 
-    missing_docs = len([e for e in entries if not e.doc_ref])
+    missing_docs = len([e for e in entries if not (e.doc_ref or "").strip()])
     missing_refs = len([e for e in entries if not e.reference])
 
     return {
@@ -64,18 +65,25 @@ def month_end_report(month: str, db: Session = Depends(get_db)):
 
 @router.get("/creditors/count")
 def count_creditors(db: Session = Depends(get_db)):
-    """Count of distinct suppliers with non-voided entries.
+    """Count suppliers with visible non-zero creditor balances.
 
-    Mirrors the row count of /api/reports/creditors without running the full
-    aggregation. Used by Sidebar badges.
+    The Creditors UI hides fully-settled suppliers, so the sidebar count should
+    match that visible table rather than counting every supplier with history.
     """
-    count = (
-        db.query(func.count(func.distinct(Entry.supplier)))
-        .filter(Entry.status != "voided")
-        .scalar()
-        or 0
+    balance_expr = (
+        func.coalesce(func.sum(case((Entry.type == "purchase", Entry.total), else_=0)), 0)
+        - func.coalesce(func.sum(case((Entry.type == "return", func.abs(Entry.total)), else_=0)), 0)
+        - func.coalesce(func.sum(case((Entry.type == "payment", func.coalesce(Entry.paid, 0)), else_=0)), 0)
+        - func.coalesce(func.sum(case((Entry.type == "payment", func.coalesce(Entry.discount_received, 0)), else_=0)), 0)
     )
-    return {"count": count}
+    rows = (
+        db.query(Entry.supplier)
+        .filter(Entry.status != "voided")
+        .group_by(Entry.supplier)
+        .having(func.abs(balance_expr) > VISIBLE_BALANCE_TOLERANCE)
+        .all()
+    )
+    return {"count": len(rows)}
 
 
 @router.get("/creditors")
@@ -101,7 +109,7 @@ def creditors_report(db: Session = Depends(get_db)):
         payments   = round(sum(e.paid or 0 for e in entries if e.type == "payment"), 2)
         discounts  = round(sum(e.discount_received or 0 for e in entries if e.type == "payment"), 2)
         balance    = round(purchases - returns - payments - discounts, 2)
-        missing_docs = len([e for e in entries if not e.doc_ref])
+        missing_docs = len([e for e in entries if not (e.doc_ref or "").strip()])
 
         # Aged payables buckets
         aged = {"current": 0, "d30": 0, "d60": 0, "d90plus": 0}

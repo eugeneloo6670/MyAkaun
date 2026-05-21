@@ -461,12 +461,49 @@ This is an audit tool — restraint signals trustworthiness.
     toast.
   - Audit Log view is still a stub; the data is useful, worth building next.
 
+- 2026-05-21 (session 7): Codex follow-up integrity fixes.
+
+  **Accounting / contract fixes**
+  These changes were made by Codex in this session after reviewing Claude's
+  Session 6 handoff and the latest `origin/main`.
+  - Purchase void now checks supplier-level payments as well as linked children.
+    Because payments are not linked to individual purchases, the previous guard
+    only blocked linked returns/credit notes. Now voiding a purchase is rejected
+    if the supplier has active payments and removing the purchase would leave a
+    negative supplier balance.
+  - Return / credit note creation is capped against the linked purchase total,
+    including existing non-voided returns against that purchase.
+  - Missing-document filters and counts now treat NULL, empty string, and
+    whitespace-only values as missing consistently.
+  - `/api/reports/creditors/count` now matches the Creditors UI by counting only
+    suppliers with visible non-zero balances.
+  - `backend/mcp_serve.py` now reads `ACCOUNTING_API` from the environment, so
+    docker-compose's `ACCOUNTING_API=http://backend:8000/api` works.
+  - CORS now allows both `http://localhost:5173` and
+    `http://127.0.0.1:5173`. Manual browser testing used `127.0.0.1`; the
+    previous localhost-only allowlist caused every POST preflight to fail with
+    `OPTIONS /api/entries/ 400`.
+
+  **Verification**
+  - Backend Python files compile with `python -m py_compile`.
+  - Frontend production build passes with Vite.
+  - Manual browser test passed for supplier-payment void guard: purchase
+    `TXN-087942` with active payment `TXN-202805` was blocked with the expected
+    negative-balance warning.
+  - Attempted to install backend dependencies into a temporary Codex venv for
+    runtime API checks, but this machine's active Python is 3.14 and
+    `pydantic-core==2.18.2` has no usable wheel here; building from source
+    failed because the MSVC linker (`link.exe`) is not installed. Runtime
+    scenario tests still need to be run in the project's normal Python env.
+
 ## Codex review TODOs (remaining)
 
 From the merged Claude + Codex review. Approximate priority.
 
-**Done (session 6):** void-chain protection, startup migrations, void button
-wired, overpayment rejection, server-side count endpoints, .gitignore cleanup.
+**Done (sessions 6-7):** void-chain protection, supplier-payment void guard,
+startup migrations, void button wired, overpayment rejection, return cap against
+linked purchase total, server-side count endpoints, missing-doc consistency,
+MCP `ACCOUNTING_API` env var, .gitignore cleanup.
 
 **Still remaining:**
 
@@ -479,12 +516,10 @@ wired, overpayment rejection, server-side count endpoints, .gitignore cleanup.
 4. **Idempotency keys** on `POST /api/entries/`.
 5. **Aged buckets account for settlements** (currently age gross purchases
    only; should age outstanding balances).
-6. **MCP server `ACCOUNTING_API` env var** (currently hardcoded; breaks in
-   docker-compose).
-7. **ULID-style short_id** to avoid collision under burst inserts.
-8. **Malaysia timezone** for `get_current_period` (currently UTC).
-9. **FX metadata fields** (`rate_source`, `rate_locked_at`).
-10. **Reversing-entry pattern** as the long-term upgrade for void. The status
+6. **ULID-style short_id** to avoid collision under burst inserts.
+7. **Malaysia timezone** for `get_current_period` (currently UTC).
+8. **FX metadata fields** (`rate_source`, `rate_locked_at`).
+9. **Reversing-entry pattern** as the long-term upgrade for void. The status
     column landed in v8 is the pragmatic version; the proper accounting pattern
     creates a counter-entry and flags both as voided. RightPanel copy has been
     updated to match current behaviour so the UI no longer lies about it.

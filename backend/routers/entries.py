@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from datetime import datetime
 from typing import Optional, Literal
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ from models.entry import Entry, AuditLog, SupplierMemory
 router = APIRouter()
 
 EntryType = Literal["purchase", "return", "payment"]
+MONEY_TOLERANCE = 0.005
 
 class EntryCreate(BaseModel):
     date: str
@@ -33,6 +34,18 @@ class EntryCreate(BaseModel):
     paid: Optional[float] = None
     balance_owed: Optional[float] = None
     discount_received: Optional[float] = None
+
+
+def missing_doc_clause():
+    return or_(Entry.doc_ref == None, func.trim(Entry.doc_ref) == "")
+
+
+def supplier_balance(entries) -> float:
+    purchases = sum(e.total or 0 for e in entries if e.type == "purchase")
+    returns = sum(abs(e.total or 0) for e in entries if e.type == "return")
+    payments = sum(e.paid or 0 for e in entries if e.type == "payment")
+    discounts = sum(e.discount_received or 0 for e in entries if e.type == "payment")
+    return round(purchases - returns - payments - discounts, 2)
 
 
 def validate_entry_invariants(payload: EntryCreate, db: Session) -> None:
@@ -75,6 +88,24 @@ def validate_entry_invariants(payload: EntryCreate, db: Session) -> None:
             raise HTTPException(status_code=400, detail="linked_to supplier does not match this entry")
         if linked.status == "voided":
             raise HTTPException(status_code=400, detail="cannot link to a voided entry")
+        existing_returns = (
+            db.query(Entry)
+            .filter(
+                Entry.type == "return",
+                Entry.linked_to == linked.short_id,
+                Entry.status != "voided",
+            )
+            .all()
+        )
+        returned_total = sum(abs(e.total or 0) for e in existing_returns)
+        if returned_total + abs(payload.total) > (linked.total or 0) + MONEY_TOLERANCE:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"return total exceeds original purchase balance for {linked.short_id}. "
+                    f"Already returned {returned_total:.2f}; purchase total is {(linked.total or 0):.2f}."
+                ),
+            )
 
     elif payload.type == "payment":
         if payload.paid is None or payload.paid <= 0:
@@ -87,7 +118,7 @@ def validate_entry_invariants(payload: EntryCreate, db: Session) -> None:
             if payload.discount_received > payload.balance_owed:
                 raise HTTPException(status_code=400, detail="discount_received cannot exceed balance_owed")
             # paid + discount must not exceed balance unless explicit overpayment
-            if payload.paid + payload.discount_received > payload.balance_owed + 0.005:
+            if payload.paid + payload.discount_received > payload.balance_owed + MONEY_TOLERANCE:
                 raise HTTPException(
                     status_code=400,
                     detail="paid + discount_received exceeds balance_owed (overpayment must be handled explicitly)",
@@ -98,7 +129,7 @@ def validate_entry_invariants(payload: EntryCreate, db: Session) -> None:
             # (supplier refund, credit balance), that needs its own design.
             # Reject here rather than silently accept and produce a negative
             # creditor balance.
-            if payload.paid > payload.balance_owed + 0.005:
+            if payload.paid > payload.balance_owed + MONEY_TOLERANCE:
                 raise HTTPException(
                     status_code=400,
                     detail=(
@@ -210,7 +241,7 @@ def list_entries(
     if type:
         q = q.filter(Entry.type == type)
     if missing_docs:
-        q = q.filter(Entry.doc_ref == None)
+        q = q.filter(missing_doc_clause())
     if linked_to:
         q = q.filter(Entry.linked_to == linked_to)
     if status:
@@ -245,7 +276,7 @@ def count_entries(
     if type:
         q = q.filter(Entry.type == type)
     if missing_docs:
-        q = q.filter(Entry.doc_ref == None)
+        q = q.filter(missing_doc_clause())
     if linked_to:
         q = q.filter(Entry.linked_to == linked_to)
     if status:
@@ -262,7 +293,7 @@ def count_missing_docs(db: Session = Depends(get_db)):
     """
     count = (
         db.query(func.count(Entry.id))
-        .filter(Entry.doc_ref == None, Entry.status != "voided")
+        .filter(missing_doc_clause(), Entry.status != "voided")
         .scalar()
         or 0
     )
@@ -289,9 +320,12 @@ def void_entry(entry_id: int, payload: VoidRequest, db: Session = Depends(get_db
 
     Voiding a parent purchase that still has non-voided returns/credit notes
     linked to it would corrupt creditor balances (the parent disappears from
-    reports but the children remain, producing negative balances). We therefore
-    reject voids on entries that have non-voided children, and the user must
-    void the children first.
+    reports but the children remain). We therefore reject voids on entries that
+    have non-voided children, and the user must void the children first.
+
+    Payments are supplier-level rather than purchase-level, so they are guarded
+    separately: voiding a purchase is rejected if active payments would leave
+    that supplier with a negative balance.
 
     To restore an entry, an admin-only un-void path would be needed; intentionally
     not exposed here.
@@ -309,7 +343,7 @@ def void_entry(entry_id: int, payload: VoidRequest, db: Session = Depends(get_db
         raise HTTPException(status_code=400, detail=f"Period {entry.month} is locked.")
 
     # Reject if any non-voided child entries link to this one. Voiding a parent
-    # while leaving its returns/payments active would break creditor balances.
+    # while leaving its returns/credit notes active would break creditor balances.
     children = (
         db.query(Entry)
         .filter(Entry.linked_to == entry.short_id, Entry.status != "voided")
@@ -325,6 +359,30 @@ def void_entry(entry_id: int, payload: VoidRequest, db: Session = Depends(get_db
                 f"Void the linked entr{'y' if len(children) == 1 else 'ies'} first."
             ),
         )
+
+    if entry.type == "purchase":
+        active_supplier_entries = (
+            db.query(Entry)
+            .filter(
+                Entry.supplier == entry.supplier,
+                Entry.status != "voided",
+                Entry.id != entry.id,
+            )
+            .all()
+        )
+        active_payments = [e for e in active_supplier_entries if e.type == "payment"]
+        balance_after_void = supplier_balance(active_supplier_entries)
+        if active_payments and balance_after_void < -MONEY_TOLERANCE:
+            payment_ids = ", ".join(e.short_id for e in active_payments)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot void {entry.short_id}: supplier has active payment"
+                    f"{'s' if len(active_payments) != 1 else ''} ({payment_ids}) and "
+                    f"voiding this purchase would leave a negative balance of "
+                    f"{balance_after_void:.2f}. Void or reverse the payment first."
+                ),
+            )
 
     entry.status = "voided"
     entry.voided_by = payload.voided_by
