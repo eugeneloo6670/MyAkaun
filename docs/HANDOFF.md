@@ -490,6 +490,30 @@ This is an audit tool — restraint signals trustworthiness.
   - Manual browser test passed for supplier-payment void guard: purchase
     `TXN-087942` with active payment `TXN-202805` was blocked with the expected
     negative-balance warning.
+  - Codex also completed the first UX follow-up: axios now has a 15s default
+    timeout, and RecordForm surfaces clearer validation, timeout, network, and
+    success toasts instead of leaving the Record button spinning indefinitely.
+    Manual browser tests confirmed both validation feedback and the
+    backend-unreachable toast.
+  - Follow-up fix: `Shell.jsx` no longer keys `RecordForm` by `refreshKey`.
+    The old key caused the form to remount immediately after `onRecorded()`,
+    wiping the success toast even though the entry was saved.
+  - Codex started the idempotency-key TODO: `POST /api/entries/` now accepts an
+    `Idempotency-Key` header, stores the key and payload fingerprint on the
+    created entry, returns the original entry on exact replay, and rejects reuse
+    of the same key with a different payload. RecordForm keeps one key per draft
+    and rotates it after success/cancel/type change.
+  - Codex redesigned the frontend interface as an accounting workstation:
+    introduced `Shell.module.css`, widened the right detail rail, refreshed the
+    sidebar, RecordForm, Ledger, Creditors, RightPanel, and HermesChatBar visual
+    systems with a restrained neutral palette, tighter controls, clearer active
+    states, and more consistent spacing. Behaviour is intended to remain
+    unchanged.
+  - Visible product name changed from MyAkaun/Hermes Accounting to
+    **AccountMaxxer**. Hermes remains the agent/integration layer name in code
+    and technical docs where relevant.
+  - Redesign build passes with Vite; automated screenshot capture was attempted
+    but Playwright is not available in the local Node runtime.
   - Attempted to install backend dependencies into a temporary Codex venv for
     runtime API checks, but this machine's active Python is 3.14 and
     `pydantic-core==2.18.2` has no usable wheel here; building from source
@@ -513,20 +537,14 @@ MCP `ACCOUNTING_API` env var, .gitignore cleanup.
    `mcp_serve.py` to 127.0.0.1 by default. Once auth lands, derive
    `recorded_by` / `voided_by` / `authorised_by` from auth context.
 3. **Audit log DB triggers** preventing UPDATE/DELETE on `audit_log`.
-4. **Idempotency keys** on `POST /api/entries/`.
-5. **Aged buckets account for settlements** (currently age gross purchases
+4. **Aged buckets account for settlements** (currently age gross purchases
    only; should age outstanding balances).
-6. **ULID-style short_id** to avoid collision under burst inserts.
-7. **Malaysia timezone** for `get_current_period` (currently UTC).
-8. **FX metadata fields** (`rate_source`, `rate_locked_at`).
-9. **Reversing-entry pattern** as the long-term upgrade for void. The status
+5. **ULID-style short_id** to avoid collision under burst inserts.
+6. **Malaysia timezone** for `get_current_period` (currently UTC).
+7. **FX metadata fields** (`rate_source`, `rate_locked_at`).
+8. **Reversing-entry pattern** as the long-term upgrade for void. The status
     column landed in v8 is the pragmatic version; the proper accounting pattern
     creates a counter-entry and flags both as voided. RightPanel copy has been
     updated to match current behaviour so the UI no longer lies about it.
 
-**UX follow-ups (found during session 6 testing):**
-
-11. **Axios timeout + error toast.** A POST to a dead backend currently spins
-    the Record button forever. Add a request timeout and surface failures.
-12. **Post-submit success toast.** Weak success feedback caused a duplicate
-    entry during testing. A clear confirmation toast would prevent resubmits.
+**UX follow-ups (found during session 6 testing):** done in session 7.

@@ -8,15 +8,15 @@
 :root {
   /* Surface + ink palette (used by HermesChatBar inline styles) */
   --color-background-primary:   #ffffff;
-  --color-background-secondary: #f4f6f8;
-  --color-background-info:      #d1faf4;
+  --color-background-secondary: #eef2f6;
+  --color-background-info:      #dff7f0;
 
-  --color-text-primary:   #1a2530;
-  --color-text-secondary: #5a6672;
+  --color-text-primary:   #17202a;
+  --color-text-secondary: #5e6875;
   --color-text-info:      #0f766e;
 
-  --color-border-secondary: #c8cfd6;
-  --color-border-tertiary:  #e3e7ec;
+  --color-border-secondary: #c4ccd7;
+  --color-border-tertiary:  #dfe5ec;
 
   --border-radius-md: 4px;
 
@@ -43,6 +43,10 @@ html, body, #root {
 
 button {
   font-family: inherit;
+}
+
+button, input, select, textarea {
+  letter-spacing: 0;
 }
 
 code {

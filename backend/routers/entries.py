@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, or_
 from datetime import datetime
 from typing import Optional, Literal
 from pydantic import BaseModel
+import hashlib
+import json
 from database import get_db
 from models.entry import Entry, AuditLog, SupplierMemory
 
@@ -46,6 +49,12 @@ def supplier_balance(entries) -> float:
     payments = sum(e.paid or 0 for e in entries if e.type == "payment")
     discounts = sum(e.discount_received or 0 for e in entries if e.type == "payment")
     return round(purchases - returns - payments - discounts, 2)
+
+
+def payload_fingerprint(payload: EntryCreate) -> str:
+    raw = payload.model_dump(mode="json")
+    encoded = json.dumps(raw, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def validate_entry_invariants(payload: EntryCreate, db: Session) -> None:
@@ -179,7 +188,26 @@ def update_supplier_memory(db: Session, entry: Entry):
 
 
 @router.post("/")
-def create_entry(payload: EntryCreate, db: Session = Depends(get_db)):
+def create_entry(
+    payload: EntryCreate,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+):
+    key = idempotency_key.strip() if idempotency_key else None
+    if key and len(key) > 128:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must be 128 characters or fewer")
+
+    fingerprint = payload_fingerprint(payload) if key else None
+    if key:
+        existing = db.query(Entry).filter_by(idempotency_key=key).first()
+        if existing:
+            if existing.idempotency_hash != fingerprint:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used for a different entry payload",
+                )
+            return existing
+
     from models.entry import Period
     month = get_month(payload.date)
     period = db.query(Period).filter_by(month=month).first()
@@ -207,6 +235,8 @@ def create_entry(payload: EntryCreate, db: Session = Depends(get_db)):
         fx_rate=payload.fx_rate,
         doc_ref=payload.doc_ref,
         linked_to=payload.linked_to,
+        idempotency_key=key,
+        idempotency_hash=fingerprint,
         recorded_by=payload.recorded_by,
         paid=payload.paid,
         balance_owed=payload.balance_owed,
@@ -217,7 +247,15 @@ def create_entry(payload: EntryCreate, db: Session = Depends(get_db)):
     log_action(db, "CREATE", entry, payload.recorded_by or "System",
                f"Entry created: {payload.description or ''}")
     update_supplier_memory(db, entry)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if key:
+            existing = db.query(Entry).filter_by(idempotency_key=key).first()
+            if existing and existing.idempotency_hash == fingerprint:
+                return existing
+        raise
     db.refresh(entry)
     return entry
 

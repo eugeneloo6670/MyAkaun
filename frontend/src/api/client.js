@@ -3,13 +3,19 @@ import axios from "axios"
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
   headers: { "Content-Type": "application/json" },
+  timeout: Number(import.meta.env.VITE_API_TIMEOUT_MS || 15000),
 })
 
 // Entries
 export const getEntries = (params = {}) => api.get("/api/entries/", { params })
 export const countEntries = (params = {}) => api.get("/api/entries/count", { params })
 export const countMissingDocs = () => api.get("/api/entries/missing-docs/count")
-export const createEntry = (data) => api.post("/api/entries/", data)
+export const createEntry = (data, idempotencyKey) =>
+  api.post(
+    "/api/entries/",
+    data,
+    idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined
+  )
 export const deleteEntry = (id, deleted_by = "User") =>
   api.delete(`/api/entries/${id}`, { params: { deleted_by } })
 

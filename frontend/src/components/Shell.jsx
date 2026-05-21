@@ -10,6 +10,7 @@ import Periods from "./Periods"
 import RightPanel from "./RightPanel"
 import HermesChatBar from "./HermesChatBar"
 import { voidEntry } from "../api/client"
+import styles from "./Shell.module.css"
 
 // Until proper auth lands, the current user is hardcoded. When auth ships,
 // derive this from the session/JWT and remove the constant.
@@ -85,7 +86,6 @@ export default function Shell() {
       case "record":
         return (
           <RecordForm
-            key={refreshKey}
             onRecorded={() => { refresh(); setPaymentPrefill(null) }}
             prefill={paymentPrefill}
           />
@@ -116,27 +116,15 @@ export default function Shell() {
   }
 
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: "180px 1fr 280px",
-      gridTemplateRows: "1fr",
-      height: "100vh",
-      overflow: "hidden",
-      fontFamily: "var(--font-sans)",
-    }}>
+    <div className={styles.shell}>
       <Sidebar
         activeView={activeView}
         onNavigate={handleNavigate}
         refreshTrigger={refreshKey}
       />
 
-      <div style={{
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        minWidth: 0,
-      }}>
-        <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+      <div className={styles.workspace}>
+        <div className={styles.content}>
           {renderView()}
         </div>
         <HermesChatBar />

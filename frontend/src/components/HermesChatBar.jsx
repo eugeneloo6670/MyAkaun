@@ -63,7 +63,7 @@ export default function HermesChatBar() {
 
   return (
     <div style={{
-      borderTop: "0.5px solid var(--color-border-tertiary)",
+      borderTop: "1px solid var(--color-border-tertiary)",
       background: "var(--color-background-primary)",
       flexShrink: 0,
     }}>
@@ -71,8 +71,8 @@ export default function HermesChatBar() {
         <div style={{
           maxHeight: 240,
           overflowY: "auto",
-          padding: "12px 16px",
-          borderBottom: "0.5px solid var(--color-border-tertiary)",
+          padding: "12px 20px",
+          borderBottom: "1px solid var(--color-border-tertiary)",
         }}>
           {messages.map((m, i) => (
             <div key={i} style={{
@@ -116,7 +116,7 @@ export default function HermesChatBar() {
       <div style={{
         display: "flex",
         gap: 8,
-        padding: "10px 16px",
+        padding: "10px 20px",
         alignItems: "center",
       }}>
         <div style={{
@@ -136,9 +136,9 @@ export default function HermesChatBar() {
           placeholder="Ask Hermes — e.g. 'Which entries are missing documents?' or 'Summarise this month'"
           style={{
             flex: 1,
-            border: "0.5px solid var(--color-border-secondary)",
-            borderRadius: "var(--border-radius-md)",
-            padding: "7px 12px",
+            border: "1px solid var(--color-border-secondary)",
+            borderRadius: 6,
+            padding: "8px 12px",
             fontSize: 13,
             background: "var(--color-background-secondary)",
             color: "var(--color-text-primary)",
@@ -149,9 +149,9 @@ export default function HermesChatBar() {
           onClick={send}
           disabled={streaming || !input.trim()}
           style={{
-            padding: "7px 14px",
-            borderRadius: "var(--border-radius-md)",
-            background: "var(--color-text-primary)",
+            padding: "8px 14px",
+            borderRadius: 6,
+            background: "#17202a",
             color: "var(--color-background-primary)",
             border: "none",
             fontSize: 13,
@@ -165,9 +165,9 @@ export default function HermesChatBar() {
           <button
             onClick={() => { setMessages([]); setOpen(false) }}
             style={{
-              padding: "7px 10px",
-              borderRadius: "var(--border-radius-md)",
-              border: "0.5px solid var(--color-border-secondary)",
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--color-border-secondary)",
               background: "none",
               fontSize: 12,
               cursor: "pointer",

@@ -37,6 +37,8 @@ class Entry(Base):
     fx_rate         = Column(Float, nullable=True)
     doc_ref         = Column(String, nullable=True)           # file path or storage key
     linked_to       = Column(String, nullable=True)           # short_id of related entry
+    idempotency_key = Column(String, unique=True, index=True, nullable=True)
+    idempotency_hash = Column(String, nullable=True)
     recorded_by     = Column(String, nullable=True)
     recorded_at     = Column(DateTime, server_default=func.now())
     voided_by       = Column(String, nullable=True)

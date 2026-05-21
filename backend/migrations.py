@@ -45,6 +45,9 @@ EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("voided_by",    "VARCHAR"),
         ("voided_at",    "DATETIME"),
         ("void_reason",  "TEXT"),
+        # Idempotent POST /api/entries/ support
+        ("idempotency_key",  "VARCHAR"),
+        ("idempotency_hash", "VARCHAR"),
     ],
 }
 
@@ -77,3 +80,11 @@ def run_migrations(engine: Engine) -> None:
                 conn.execute(text(
                     "UPDATE entries SET status = 'posted' WHERE status IS NULL"
                 ))
+
+        if "entries" in existing_tables:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_entries_idempotency_key "
+                "ON entries (idempotency_key) "
+                "WHERE idempotency_key IS NOT NULL"
+            ))

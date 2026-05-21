@@ -102,8 +102,8 @@ export default function Sidebar({
       <div className={styles.brand}>
         <div className={styles.brandMark}>μ</div>
         <div className={styles.brandText}>
-          <div className={styles.brandName}>MyAkaun</div>
-          <div className={styles.brandTag}>Hermes Accounting</div>
+          <div className={styles.brandName}>AccountMaxxer</div>
+          <div className={styles.brandTag}>AI Accounting</div>
         </div>
       </div>
 

@@ -6,33 +6,35 @@
 */
 
 .form {
-  --bg: #fafbfc;
+  --bg: #f6f8fb;
   --surface: #ffffff;
-  --border: #e3e7ec;
-  --border-strong: #c8cfd6;
-  --ink: #1a2530;
-  --ink-soft: #5a6672;
-  --ink-mute: #8a929b;
+  --border: #dfe5ec;
+  --border-strong: #c2ccd8;
+  --ink: #17202a;
+  --ink-soft: #596676;
+  --ink-mute: #8a96a5;
   --accent: #0f766e;          /* teal — primary action */
-  --accent-soft: #d1faf4;
+  --accent-soft: #e1f5f1;
   --amber: #b45309;           /* warnings, period lock */
   --amber-soft: #fef3c7;
   --red: #b91c1c;
   --red-soft: #fee2e2;
   --green: #166534;
 
-  background: var(--surface);
+  background: rgba(255,255,255,0.96);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 24px;
+  border-radius: 8px;
+  padding: 22px 24px 20px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   color: var(--ink);
   font-size: 14px;
   line-height: 1.5;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
   position: relative;
+  max-width: 1180px;
+  min-height: calc(100vh - 48px);
 }
 
 /* ----- Type selector ----- */
@@ -41,9 +43,9 @@
   display: flex;
   gap: 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 7px;
   overflow: hidden;
-  background: var(--bg);
+  background: #eef3f6;
 }
 
 .typeBtn {
@@ -51,7 +53,7 @@
   background: transparent;
   border: 0;
   border-right: 1px solid var(--border);
-  padding: 10px 12px;
+  padding: 9px 12px;
   font-size: 13px;
   font-weight: 500;
   color: var(--ink-soft);
@@ -66,7 +68,7 @@
   background: var(--surface);
   color: var(--accent);
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 -3px 0 var(--accent);
 }
 
 /* ----- Period lock banner ----- */
@@ -75,7 +77,7 @@
   background: var(--amber-soft);
   color: var(--amber);
   border: 1px solid #fbbf24;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 500;
@@ -86,7 +88,7 @@
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 15px 16px;
 }
 
 .fullRow { grid-column: 1 / -1; }
@@ -100,17 +102,17 @@
 
 .label {
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 650;
   color: var(--ink-soft);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
 }
 
 .input {
   background: var(--surface);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  padding: 8px 10px;
+  border-radius: 6px;
+  padding: 9px 10px;
   font-size: 14px;
   color: var(--ink);
   font-family: inherit;
@@ -122,7 +124,7 @@
 .input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.13);
 }
 
 .input:disabled {
@@ -169,7 +171,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding-top: 16px;
+  padding-top: 18px;
   border-top: 1px solid var(--border);
 }
 
@@ -189,9 +191,9 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
-  background: var(--bg);
+  background: #f8fafc;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 8px;
   padding: 14px;
 }
 
@@ -202,7 +204,7 @@
 .readonlyBox {
   background: var(--surface);
   border: 1px dashed var(--border-strong);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 8px 10px;
   font-size: 14px;
   color: var(--ink);
@@ -213,10 +215,10 @@
 /* ----- Payment-specific ----- */
 
 .balanceBox {
-  background: var(--bg);
+  background: #f8fafc;
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 10px 14px;
   font-size: 15px;
   font-variant-numeric: tabular-nums;
@@ -228,7 +230,7 @@
   background: var(--accent-soft);
   color: #0c5a54;
   border: 1px solid #5eead4;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 10px 14px;
   font-size: 13px;
 }
@@ -237,7 +239,7 @@
   background: var(--amber-soft);
   color: var(--amber);
   border: 1px solid #fbbf24;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 10px 14px;
   font-size: 13px;
 }
@@ -248,7 +250,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-top: 16px;
+  padding-top: 18px;
   border-top: 1px solid var(--border);
   gap: 16px;
   flex-wrap: wrap;
@@ -266,7 +268,7 @@
 
 .cancelBtn, .recordBtn {
   padding: 9px 18px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -286,14 +288,14 @@
 }
 
 .recordBtn {
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  background: #0b6861;
+  border: 1px solid #0b6861;
   color: #fff;
 }
 
 .recordBtn:hover:not(:disabled) {
-  background: #0b5e57;
-  border-color: #0b5e57;
+  background: #07564f;
+  border-color: #07564f;
 }
 
 .cancelBtn:disabled, .recordBtn:disabled {
@@ -316,7 +318,7 @@
   left: 50%;
   transform: translateX(-50%);
   padding: 10px 18px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
   box-shadow: 0 4px 12px rgba(0,0,0,0.08);

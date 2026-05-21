@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import api, { getSupplierMemory, getEntries, getCreditors, getPeriodStatus, createEntry } from '../../api/client';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { getSupplierMemory, getEntries, getCreditors, getPeriodStatus, createEntry } from '../../api/client';
 import styles from './RecordForm.module.css';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,29 @@ const fmtMYR = (n) => {
 
 const periodKey = (dateStr) => (dateStr ? dateStr.slice(0, 7) : '');
 
+const newIdempotencyKey = () => {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `entry-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
+const submitErrorMessage = (err) => {
+  const detail = err?.response?.data?.detail;
+  if (detail) return detail;
+  if (err?.code === 'ECONNABORTED') {
+    return 'Request timed out. Check that the backend is running, then try again.';
+  }
+  if (err?.message?.toLowerCase().includes('timeout')) {
+    return 'Request timed out. Check that the backend is running, then try again.';
+  }
+  if (err?.request && !err?.response) {
+    return 'Could not reach the backend. Check that the API is running, then try again.';
+  }
+  if (err?.response?.status === 409) {
+    return 'This submit key was already used for a different entry. Review the form and try again.';
+  }
+  return 'Failed to record entry';
+};
+
 const emptyForm = (type) => ({
   type,
   date: today(),
@@ -96,11 +119,26 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+  const idempotencyKey = useRef(newIdempotencyKey());
 
   const t = form.type;
   const isReversal = t === 'credit_note' || t === 'return';
   const isPayment = t === 'payment';
   const isPurchase = t === 'purchase';
+
+  const showToast = useCallback((nextToast, duration = 5000) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(nextToast);
+    toastTimer.current = setTimeout(() => {
+      setToast(null);
+      toastTimer.current = null;
+    }, duration);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Data fetching
@@ -288,10 +326,14 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
   // Handlers
   // -------------------------------------------------------------------------
 
-  const update = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const update = (patch) => {
+    setForm((f) => ({ ...f, ...patch }));
+    if (toast?.kind === 'error') setToast(null);
+  };
 
   const switchType = (newType) => {
     // Preserve date + supplier; reset type-specific fields
+    idempotencyKey.current = newIdempotencyKey();
     setForm((f) => ({
       ...emptyForm(newType),
       date: f.date,
@@ -304,9 +346,17 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
     ev.preventDefault();
     const v = validate();
     setErrors(v);
-    if (Object.keys(v).length > 0 || periodLocked) return;
+    if (Object.keys(v).length > 0) {
+      showToast({ kind: 'error', msg: 'Please resolve the highlighted fields.' }, 3500);
+      return;
+    }
+    if (periodLocked) {
+      showToast({ kind: 'error', msg: 'This period is locked.' }, 3500);
+      return;
+    }
 
     setSubmitting(true);
+    setToast(null);
     try {
       const payload = buildPayload(form, {
         currentUser,
@@ -315,23 +365,21 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
         paymentDiscount,
         supplierBalance,
       });
-      const res = await createEntry(payload);
+      const res = await createEntry(payload, idempotencyKey.current);
       const txn = res.data?.short_id || 'TXN-??????';
-      setToast({ kind: 'success', msg: `Recorded ${txn}` });
+      showToast({ kind: 'success', msg: `Recorded ${txn}` });
+      idempotencyKey.current = newIdempotencyKey();
       setForm((f) => emptyForm(f.type));
       if (onRecorded) onRecorded(res.data);
     } catch (err) {
-      setToast({
-        kind: 'error',
-        msg: err?.response?.data?.detail || 'Failed to record entry',
-      });
+      showToast({ kind: 'error', msg: submitErrorMessage(err) }, 7000);
     } finally {
       setSubmitting(false);
-      setTimeout(() => setToast(null), 4000);
     }
   };
 
   const handleCancel = () => {
+    idempotencyKey.current = newIdempotencyKey();
     setForm((f) => emptyForm(f.type));
     setErrors({});
   };
@@ -629,7 +677,7 @@ export default function RecordForm({ currentUser = 'eugene', onRecorded, prefill
       </div>
 
       <div className={styles.hermesHint}>
-        Hermes will review this entry against MPERS rules and supplier history.
+        AccountMaxxer will review this entry against MPERS rules and supplier history.
       </div>
 
       {toast && (
