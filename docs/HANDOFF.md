@@ -414,27 +414,84 @@ This is an audit tool — restraint signals trustworthiness.
 
   **Deferred to next focused session** — see Codex review TODOs below.
 
+- 2026-05-21 (session 6): Second Codex review applied, then end-to-end
+  runtime testing.
+
+  **Codex second-review fixes (landed as 3 PRs)**
+  - `.gitignore` added; untracked node_modules + __pycache__ + *.db that had
+    been accidentally committed in v8 (~2700 files of bloat).
+  - Void-chain protection (Codex Critical): `void_entry()` now rejects voiding
+    any entry that has non-voided children linking to it, listing the blocking
+    short_ids. Prevents the corruption where a voided parent disappears from
+    reports but its returns/payments remain, producing negative balances.
+  - Startup migrations: `backend/migrations.py` added — PRAGMA table_info check
+    + ALTER TABLE for columns missing on an existing DB. `create_all()` alone
+    never alters existing tables. Wired into main.py. Stand-in for Alembic.
+  - Void button wired in Shell.jsx: RightPanel's `onDelete` prop was never
+    passed by Shell, so the button never rendered. Now wired with native
+    confirm + reason prompts.
+  - Overpayments rejected: `validate_entry_invariants` now rejects
+    `paid > balance_owed` when no discount is given (was silently accepted).
+  - Server-side count endpoints: `GET /api/entries/count`,
+    `/api/entries/missing-docs/count`, `/api/reports/creditors/count`.
+    Sidebar uses these instead of fetching full lists every 60s.
+
+  **End-to-end runtime test (all passed)**
+  Tested the full void flow against running backend + frontend:
+  - Recording a purchase works; entry appears in Ledger; counts update.
+  - Soft-delete verified: voided a duplicate purchase — entry retained in DB,
+    filtered from Ledger, VOID action with reason written to audit log
+    (confirmed via `/api/entries/audit-log/all`).
+  - Void button renders in RightPanel (PR fix confirmed working).
+  - Recording a Return linked to a purchase works; negative total enforced;
+    `linked_to` dropdown shows valid purchases only.
+  - **Void-chain protection confirmed**: attempting to void a parent purchase
+    while its linked return was still active was BLOCKED with a clear message
+    naming the blocking entry. This is the Codex Critical fix, proven.
+  - Full chain completed: voided the return first (succeeded), then the parent
+    purchase (succeeded). Ledger correctly emptied, counts to 0.
+  - SST label, bidirectional linked-entries panel, migration startup — all
+    verified working.
+
+  **Observations / minor follow-ups noted during testing**
+  - A hung POST (e.g. backend down) leaves the Record button spinning forever
+    with no timeout. Add an axios timeout + error toast.
+  - Post-submit success feedback is weak — no toast — which caused a duplicate
+    entry during testing (user resubmitted thinking it failed). Add a success
+    toast.
+  - Audit Log view is still a stub; the data is useful, worth building next.
+
 ## Codex review TODOs (remaining)
 
-From the merged Claude + Codex review. Approximate priority:
+From the merged Claude + Codex review. Approximate priority.
+
+**Done (session 6):** void-chain protection, startup migrations, void button
+wired, overpayment rejection, server-side count endpoints, .gitignore cleanup.
+
+**Still remaining:**
 
 1. **Float → Decimal** for monetary fields. Single-session focused job;
    requires Alembic migration and JSON serialization verification.
-2. **Server-side count endpoints + drop Sidebar full-list polling.** High
-   payoff, ~30 min.
-3. **Auth design.** Bearer-token API key for the FastAPI app. Bind
+2. **Auth design.** Bearer-token API key for the FastAPI app. Bind
    `mcp_serve.py` to 127.0.0.1 by default. Once auth lands, derive
    `recorded_by` / `voided_by` / `authorised_by` from auth context.
-4. **Audit log DB triggers** preventing UPDATE/DELETE on `audit_log`.
-5. **Idempotency keys** on `POST /api/entries/`.
-6. **Aged buckets account for settlements** (currently age gross purchases
+3. **Audit log DB triggers** preventing UPDATE/DELETE on `audit_log`.
+4. **Idempotency keys** on `POST /api/entries/`.
+5. **Aged buckets account for settlements** (currently age gross purchases
    only; should age outstanding balances).
-7. **MCP server `ACCOUNTING_API` env var** (currently hardcoded; breaks in
+6. **MCP server `ACCOUNTING_API` env var** (currently hardcoded; breaks in
    docker-compose).
-8. **ULID-style short_id** to avoid collision under burst inserts.
-9. **Malaysia timezone** for `get_current_period` (currently UTC).
-10. **FX metadata fields** (`rate_source`, `rate_locked_at`).
-11. **Reversing-entry pattern** as the long-term upgrade for void. The status
+7. **ULID-style short_id** to avoid collision under burst inserts.
+8. **Malaysia timezone** for `get_current_period` (currently UTC).
+9. **FX metadata fields** (`rate_source`, `rate_locked_at`).
+10. **Reversing-entry pattern** as the long-term upgrade for void. The status
     column landed in v8 is the pragmatic version; the proper accounting pattern
     creates a counter-entry and flags both as voided. RightPanel copy has been
     updated to match current behaviour so the UI no longer lies about it.
+
+**UX follow-ups (found during session 6 testing):**
+
+11. **Axios timeout + error toast.** A POST to a dead backend currently spins
+    the Record button forever. Add a request timeout and surface failures.
+12. **Post-submit success toast.** Weak success feedback caused a duplicate
+    entry during testing. A clear confirmation toast would prevent resubmits.
