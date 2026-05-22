@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 from database import get_db
 from models.entry import Entry, AuditLog
+from money import money_sum
 from services.hermes_bridge import query_hermes
 import json
 
@@ -23,7 +24,7 @@ def build_context(entries: list, audit_log: list) -> str:
     Builds a structured English context block injected into every Hermes query.
     Hermes reads this alongside its SOUL.md and accounting skills.
     """
-    total = round(sum(e.total for e in entries if e.type == "purchase"), 2)
+    total = money_sum(e.total for e in entries if e.type == "purchase")
     missing_docs = [e.short_id for e in entries if not e.doc_ref]
     suppliers = list(set(e.supplier for e in entries))
 

@@ -6,6 +6,11 @@ const api = axios.create({
   timeout: Number(import.meta.env.VITE_API_TIMEOUT_MS || 15000),
 })
 
+const apiToken = import.meta.env.VITE_ACCOUNTMAXXER_API_TOKEN
+if (apiToken) {
+  api.defaults.headers.common.Authorization = `Bearer ${apiToken}`
+}
+
 // Entries
 export const getEntries = (params = {}) => api.get("/api/entries/", { params })
 export const countEntries = (params = {}) => api.get("/api/entries/count", { params })

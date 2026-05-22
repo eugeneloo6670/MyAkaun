@@ -520,29 +520,96 @@ This is an audit tool — restraint signals trustworthiness.
     failed because the MSVC linker (`link.exe`) is not installed. Runtime
     scenario tests still need to be run in the project's normal Python env.
 
+- 2026-05-22 (session 8): Codex Decimal money pass.
+
+  **Accounting precision**
+  - Replaced SQLAlchemy `Float` money fields with `Numeric(..., asdecimal=True)`
+    on `Entry` and `AuditLog`.
+  - Replaced `EntryCreate` money/rate inputs with Pydantic `Decimal` fields.
+  - Added `backend/money.py` for shared money quantization, rate quantization,
+    and the half-cent tolerance used by validation/reporting.
+  - Updated entry validation, supplier-balance checks, month-end reports,
+    creditor reports, aged-payables summary, and Hermes context generation to do
+    backend arithmetic with `Decimal` instead of binary floats.
+  - API JSON remains frontend-compatible: FastAPI encodes Decimal values as JSON
+    numbers, so React components can continue using `Number(...)`.
+
+  **Verification**
+  - Backend Decimal paths compile with `python -m py_compile`.
+  - Disposable SQLite API smoke test passed: purchase + payment with settlement
+    discount stored as `Decimal`, idempotency replay returned the same entry,
+    creditor balance closed to 0, and month-end closing balance serialized as a
+    JSON number.
+  - Legacy SQLite compatibility smoke test passed: an old table with `FLOAT`
+    columns was read through the new `Numeric` model as `Decimal`. Note that
+    SQLite type affinity means this is an ORM/API precision fix, not a full
+    physical table rebuild; a production-grade migration should still be done
+    before moving to a stricter database.
+
+- 2026-05-22 (session 9): Codex TODO sweep.
+
+  **Security / audit**
+  - Added optional bearer-token API auth. If `ACCOUNTMAXXER_API_TOKEN` (or
+    `ACCOUNTING_API_TOKEN`) is unset, localhost/dev behaviour is unchanged. If
+    set, `/api/*` requires `Authorization: Bearer <token>` while `/health`
+    remains public.
+  - Added `ACCOUNTMAXXER_API_USER` / `ACCOUNTING_API_USER` as the server-side
+    audit actor. When auth is enabled, entry creation, voiding, and period
+    lock/unlock ignore spoofable frontend actor fields and use this configured
+    backend identity.
+  - Frontend axios sends `VITE_ACCOUNTMAXXER_API_TOKEN` as a bearer token when
+    present.
+  - `mcp_serve.py` now binds to `127.0.0.1` by default (`MCP_HOST` /
+    `MCP_PORT` override available) and forwards `ACCOUNTING_API_TOKEN` or
+    `ACCOUNTMAXXER_API_TOKEN` to the backend.
+  - SQLite startup migrations now install `audit_log_no_update` and
+    `audit_log_no_delete` triggers. They abort direct `UPDATE`/`DELETE` against
+    `audit_log` with `audit_log is append-only`.
+
+  **Accounting / identifiers**
+  - Creditor aged buckets now age outstanding purchase balances, not gross
+    purchase history. Payments and discounts reduce oldest open purchases FIFO;
+    returns reduce their linked purchase first, then FIFO if needed.
+  - `generate_short_id()` now produces ULID-style sortable IDs with random
+    entropy instead of using the last six digits of the millisecond timestamp.
+  - `GET /api/periods/current` now uses Malaysia UTC+8 time via a fixed
+    timezone, avoiding Windows `tzdata` dependency issues.
+  - FX metadata fields landed: `rate_source` and `rate_locked_at` on `Entry`,
+    startup migration columns, backend defaults for manual FX rates, and
+    RightPanel display.
+
+  **Verification**
+  - Backend Python files compile with `python -m py_compile`.
+  - Frontend production build passes with Vite.
+  - Combined disposable SQLite smoke test passed: unauthenticated API blocked
+    when token set, `/health` public, server-side actor used for entries, FX
+    metadata stored, aged total matched creditor balance after payment + linked
+    return, audit triggers blocked raw updates, and 2,000 generated short IDs
+    were unique.
+  - Live browser smoke test passed before commit: recorded FX purchase
+    `TXN-01KS7DHSPPQZ0HCYQJCMSA74BP` for `Browser FX Supplier`, success toast
+    appeared, Ledger showed the ULID-style ID, RightPanel showed `Rate source`
+    and `Rate locked`, creditor report aged the RM 50 balance as current, and no
+    browser console errors were present.
+  - README refreshed by Codex to match the current AccountMaxxer name, optional
+    auth env vars, Decimal money behaviour, MCP localhost defaults, FX metadata,
+    audit-log triggers, and remaining roadmap.
+
 ## Codex review TODOs (remaining)
 
 From the merged Claude + Codex review. Approximate priority.
 
-**Done (sessions 6-7):** void-chain protection, supplier-payment void guard,
+**Done (sessions 6-9):** void-chain protection, supplier-payment void guard,
 startup migrations, void button wired, overpayment rejection, return cap against
 linked purchase total, server-side count endpoints, missing-doc consistency,
-MCP `ACCOUNTING_API` env var, .gitignore cleanup.
+MCP `ACCOUNTING_API` env var, Decimal-backed backend money arithmetic, optional
+bearer-token auth, MCP localhost binding, audit-log triggers, settlement-aware
+aged buckets, ULID-style short IDs, Malaysia current-period timezone, FX
+metadata, and repo .gitignore cleanup.
 
 **Still remaining:**
 
-1. **Float → Decimal** for monetary fields. Single-session focused job;
-   requires Alembic migration and JSON serialization verification.
-2. **Auth design.** Bearer-token API key for the FastAPI app. Bind
-   `mcp_serve.py` to 127.0.0.1 by default. Once auth lands, derive
-   `recorded_by` / `voided_by` / `authorised_by` from auth context.
-3. **Audit log DB triggers** preventing UPDATE/DELETE on `audit_log`.
-4. **Aged buckets account for settlements** (currently age gross purchases
-   only; should age outstanding balances).
-5. **ULID-style short_id** to avoid collision under burst inserts.
-6. **Malaysia timezone** for `get_current_period` (currently UTC).
-7. **FX metadata fields** (`rate_source`, `rate_locked_at`).
-8. **Reversing-entry pattern** as the long-term upgrade for void. The status
+1. **Reversing-entry pattern** as the long-term upgrade for void. The status
     column landed in v8 is the pragmatic version; the proper accounting pattern
     creates a counter-entry and flags both as voided. RightPanel copy has been
     updated to match current behaviour so the UI no longer lies about it.

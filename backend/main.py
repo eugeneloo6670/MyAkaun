@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 from migrations import run_migrations
 from routers import entries, periods, reports, hermes
+from auth import require_api_auth
 
 # Create any tables that don't exist yet (no-op if they all exist).
 Base.metadata.create_all(bind=engine)
@@ -27,10 +28,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(entries.router, prefix="/api/entries", tags=["entries"])
-app.include_router(periods.router, prefix="/api/periods", tags=["periods"])
-app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
-app.include_router(hermes.router, prefix="/api/hermes", tags=["hermes"])
+api_auth = [Depends(require_api_auth)]
+app.include_router(entries.router, prefix="/api/entries", tags=["entries"], dependencies=api_auth)
+app.include_router(periods.router, prefix="/api/periods", tags=["periods"], dependencies=api_auth)
+app.include_router(reports.router, prefix="/api/reports", tags=["reports"], dependencies=api_auth)
+app.include_router(hermes.router, prefix="/api/hermes", tags=["hermes"], dependencies=api_auth)
 
 @app.get("/health")
 def health():

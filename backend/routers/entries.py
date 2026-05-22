@@ -3,17 +3,19 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, or_
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional, Literal
 from pydantic import BaseModel
 import hashlib
 import json
 from database import get_db
 from models.entry import Entry, AuditLog, SupplierMemory
+from money import MONEY_TOLERANCE, money, money_sum, percent, rate
+from auth import AuthContext, require_api_auth
 
 router = APIRouter()
 
 EntryType = Literal["purchase", "return", "payment"]
-MONEY_TOLERANCE = 0.005
 
 class EntryCreate(BaseModel):
     date: str
@@ -23,32 +25,34 @@ class EntryCreate(BaseModel):
     description: Optional[str] = None
     gl_code: Optional[str] = None
     gl_name: Optional[str] = None
-    amount: float
-    sst_rate: float = 0
-    sst_amount: float = 0
-    total: float
+    amount: Decimal
+    sst_rate: Decimal = Decimal("0")
+    sst_amount: Decimal = Decimal("0")
+    total: Decimal
     orig_ccy: str = "MYR"
-    orig_amount: Optional[float] = None
-    fx_rate: Optional[float] = None
+    orig_amount: Optional[Decimal] = None
+    fx_rate: Optional[Decimal] = None
+    rate_source: Optional[str] = None
+    rate_locked_at: Optional[datetime] = None
     doc_ref: Optional[str] = None
     linked_to: Optional[str] = None
     recorded_by: Optional[str] = "System"
     # Payment fields
-    paid: Optional[float] = None
-    balance_owed: Optional[float] = None
-    discount_received: Optional[float] = None
+    paid: Optional[Decimal] = None
+    balance_owed: Optional[Decimal] = None
+    discount_received: Optional[Decimal] = None
 
 
 def missing_doc_clause():
     return or_(Entry.doc_ref == None, func.trim(Entry.doc_ref) == "")
 
 
-def supplier_balance(entries) -> float:
-    purchases = sum(e.total or 0 for e in entries if e.type == "purchase")
-    returns = sum(abs(e.total or 0) for e in entries if e.type == "return")
-    payments = sum(e.paid or 0 for e in entries if e.type == "payment")
-    discounts = sum(e.discount_received or 0 for e in entries if e.type == "payment")
-    return round(purchases - returns - payments - discounts, 2)
+def supplier_balance(entries) -> Decimal:
+    purchases = money_sum(e.total for e in entries if e.type == "purchase")
+    returns = money_sum(abs(e.total or 0) for e in entries if e.type == "return")
+    payments = money_sum(e.paid for e in entries if e.type == "payment")
+    discounts = money_sum(e.discount_received for e in entries if e.type == "payment")
+    return money(purchases - returns - payments - discounts)
 
 
 def payload_fingerprint(payload: EntryCreate) -> str:
@@ -106,13 +110,13 @@ def validate_entry_invariants(payload: EntryCreate, db: Session) -> None:
             )
             .all()
         )
-        returned_total = sum(abs(e.total or 0) for e in existing_returns)
-        if returned_total + abs(payload.total) > (linked.total or 0) + MONEY_TOLERANCE:
+        returned_total = money_sum(abs(e.total or 0) for e in existing_returns)
+        if returned_total + abs(payload.total) > money(linked.total or 0) + MONEY_TOLERANCE:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"return total exceeds original purchase balance for {linked.short_id}. "
-                    f"Already returned {returned_total:.2f}; purchase total is {(linked.total or 0):.2f}."
+                    f"Already returned {returned_total:.2f}; purchase total is {money(linked.total or 0):.2f}."
                 ),
             )
 
@@ -191,6 +195,7 @@ def update_supplier_memory(db: Session, entry: Entry):
 def create_entry(
     payload: EntryCreate,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    auth: AuthContext = Depends(require_api_auth),
     db: Session = Depends(get_db),
 ):
     key = idempotency_key.strip() if idempotency_key else None
@@ -217,6 +222,7 @@ def create_entry(
     # Server-side invariants (type/sign/linkage/payment-balance).
     validate_entry_invariants(payload, db)
 
+    actor = auth.actor(payload.recorded_by or "System")
     entry = Entry(
         date=payload.date,
         month=month,
@@ -226,25 +232,27 @@ def create_entry(
         description=payload.description,
         gl_code=payload.gl_code,
         gl_name=payload.gl_name,
-        amount=payload.amount,
-        sst_rate=payload.sst_rate,
-        sst_amount=payload.sst_amount,
-        total=payload.total,
+        amount=money(payload.amount),
+        sst_rate=percent(payload.sst_rate),
+        sst_amount=money(payload.sst_amount),
+        total=money(payload.total),
         orig_ccy=payload.orig_ccy,
-        orig_amount=payload.orig_amount,
-        fx_rate=payload.fx_rate,
+        orig_amount=money(payload.orig_amount) if payload.orig_amount is not None else None,
+        fx_rate=rate(payload.fx_rate) if payload.fx_rate is not None else None,
+        rate_source=payload.rate_source or ("manual" if payload.fx_rate is not None else None),
+        rate_locked_at=payload.rate_locked_at or (datetime.utcnow() if payload.fx_rate is not None else None),
         doc_ref=payload.doc_ref,
         linked_to=payload.linked_to,
         idempotency_key=key,
         idempotency_hash=fingerprint,
-        recorded_by=payload.recorded_by,
-        paid=payload.paid,
-        balance_owed=payload.balance_owed,
-        discount_received=payload.discount_received,
+        recorded_by=actor,
+        paid=money(payload.paid) if payload.paid is not None else None,
+        balance_owed=money(payload.balance_owed) if payload.balance_owed is not None else None,
+        discount_received=money(payload.discount_received) if payload.discount_received is not None else None,
     )
     db.add(entry)
     db.flush()
-    log_action(db, "CREATE", entry, payload.recorded_by or "System",
+    log_action(db, "CREATE", entry, actor,
                f"Entry created: {payload.description or ''}")
     update_supplier_memory(db, entry)
     try:
@@ -347,12 +355,17 @@ def get_entry(entry_id: int, db: Session = Depends(get_db)):
 
 
 class VoidRequest(BaseModel):
-    voided_by: str
+    voided_by: Optional[str] = None
     reason: Optional[str] = None
 
 
 @router.post("/{entry_id}/void")
-def void_entry(entry_id: int, payload: VoidRequest, db: Session = Depends(get_db)):
+def void_entry(
+    entry_id: int,
+    payload: VoidRequest,
+    auth: AuthContext = Depends(require_api_auth),
+    db: Session = Depends(get_db),
+):
     """Mark an entry as voided. The row is NEVER deleted. All reports and the
     creditors view filter out voided rows. The audit log records the void.
 
@@ -422,12 +435,13 @@ def void_entry(entry_id: int, payload: VoidRequest, db: Session = Depends(get_db
                 ),
             )
 
+    actor = auth.actor(payload.voided_by or "System")
     entry.status = "voided"
-    entry.voided_by = payload.voided_by
+    entry.voided_by = actor
     entry.voided_at = datetime.utcnow()
     entry.void_reason = payload.reason
 
-    log_action(db, "VOID", entry, payload.voided_by,
+    log_action(db, "VOID", entry, actor,
                f"Entry voided: {payload.reason or 'no reason given'}")
     db.commit()
     db.refresh(entry)

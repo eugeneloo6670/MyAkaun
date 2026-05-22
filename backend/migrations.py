@@ -48,6 +48,9 @@ EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # Idempotent POST /api/entries/ support
         ("idempotency_key",  "VARCHAR"),
         ("idempotency_hash", "VARCHAR"),
+        # FX audit metadata
+        ("rate_source",      "VARCHAR"),
+        ("rate_locked_at",   "DATETIME"),
     ],
 }
 
@@ -87,4 +90,24 @@ def run_migrations(engine: Engine) -> None:
                 "ix_entries_idempotency_key "
                 "ON entries (idempotency_key) "
                 "WHERE idempotency_key IS NOT NULL"
+            ))
+
+        if engine.dialect.name == "sqlite" and "audit_log" in existing_tables:
+            conn.execute(text(
+                """
+                CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+                BEFORE UPDATE ON audit_log
+                BEGIN
+                    SELECT RAISE(ABORT, 'audit_log is append-only');
+                END
+                """
+            ))
+            conn.execute(text(
+                """
+                CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+                BEFORE DELETE ON audit_log
+                BEGIN
+                    SELECT RAISE(ABORT, 'audit_log is append-only');
+                END
+                """
             ))

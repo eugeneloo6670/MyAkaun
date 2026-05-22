@@ -214,6 +214,18 @@ export default function RightPanel({ entry, onClose, onDelete }) {
               <span className={styles.fxLabel}>FX rate</span>
               <span className={styles.fxValue}>{entry.fx_rate}</span>
             </div>
+            {entry.rate_source && (
+              <div>
+                <span className={styles.fxLabel}>Rate source</span>
+                <span className={styles.fxValue}>{entry.rate_source}</span>
+              </div>
+            )}
+            {entry.rate_locked_at && (
+              <div>
+                <span className={styles.fxLabel}>Rate locked</span>
+                <span className={styles.fxValue}>{fmtDateTime(entry.rate_locked_at)}</span>
+              </div>
+            )}
           </div>
         )}
       </div>

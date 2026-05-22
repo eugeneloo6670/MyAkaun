@@ -19,6 +19,9 @@ from typing import Optional, Any
 import uvicorn, httpx, json, os
 
 ACCOUNTING_API = os.getenv("ACCOUNTING_API", "http://localhost:8000/api").rstrip("/")
+ACCOUNTING_API_TOKEN = os.getenv("ACCOUNTING_API_TOKEN") or os.getenv("ACCOUNTMAXXER_API_TOKEN")
+MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.getenv("MCP_PORT", "8001"))
 
 app = FastAPI(title="Hermes Accounting MCP Server")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -103,35 +106,36 @@ async def call_tool(request: MCPCallRequest):
     """Hermes calls this to invoke a tool."""
     tool = request.tool
     params = request.params
+    headers = {"Authorization": f"Bearer {ACCOUNTING_API_TOKEN}"} if ACCOUNTING_API_TOKEN else None
 
     async with httpx.AsyncClient(timeout=30) as client:
 
         if tool == "record_entry":
-            r = await client.post(f"{ACCOUNTING_API}/entries/", json=params)
+            r = await client.post(f"{ACCOUNTING_API}/entries/", json=params, headers=headers)
             return r.json()
 
         elif tool == "query_ledger":
-            r = await client.get(f"{ACCOUNTING_API}/entries/", params=params)
+            r = await client.get(f"{ACCOUNTING_API}/entries/", params=params, headers=headers)
             return r.json()
 
         elif tool == "get_creditor_balance":
             supplier = params.get("supplier")
-            r = await client.get(f"{ACCOUNTING_API}/reports/creditors")
+            r = await client.get(f"{ACCOUNTING_API}/reports/creditors", headers=headers)
             creditors = r.json()
             match = next((c for c in creditors if c["supplier"] == supplier), None)
             return match or {"error": f"Supplier '{supplier}' not found"}
 
         elif tool == "get_month_end_summary":
             month = params.get("month")
-            r = await client.get(f"{ACCOUNTING_API}/reports/month-end/{month}")
+            r = await client.get(f"{ACCOUNTING_API}/reports/month-end/{month}", headers=headers)
             return r.json()
 
         elif tool == "get_aged_payables":
-            r = await client.get(f"{ACCOUNTING_API}/reports/aged-payables")
+            r = await client.get(f"{ACCOUNTING_API}/reports/aged-payables", headers=headers)
             return r.json()
 
         elif tool == "set_period_lock":
-            r = await client.post(f"{ACCOUNTING_API}/periods/lock", json=params)
+            r = await client.post(f"{ACCOUNTING_API}/periods/lock", json=params, headers=headers)
             return r.json()
 
         else:
@@ -139,4 +143,4 @@ async def call_tool(request: MCPCallRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host=MCP_HOST, port=MCP_PORT)

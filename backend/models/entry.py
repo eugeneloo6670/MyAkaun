@@ -1,17 +1,25 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, Text
 from sqlalchemy.sql import func
 from database import Base
-import time, random, string
+import secrets
+import time
 
-# TODO(decimal-migration): Float is used throughout for monetary fields. This is
-# correct for demo/prototype use but should be migrated to Numeric(12, 2) + Pydantic
-# Decimal before storing real books. Codex review item Important #8. Plan: do it in a
-# focused session with Alembic migration, full report/test pass, and JSON serialization
-# verified on the frontend. Not safe to mix into a multi-fix session.
+MONEY_TYPE = Numeric(14, 2, asdecimal=True)
+RATE_TYPE = Numeric(18, 6, asdecimal=True)
+PERCENT_TYPE = Numeric(5, 2, asdecimal=True)
 
 def generate_short_id():
-    suffix = str(int(time.time() * 1000))[-6:]
-    return f"TXN-{suffix}"
+    alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+    timestamp_ms = int(time.time() * 1000)
+
+    encoded_time = ""
+    value = timestamp_ms
+    for _ in range(10):
+        encoded_time = alphabet[value % 32] + encoded_time
+        value //= 32
+
+    random_part = "".join(secrets.choice(alphabet) for _ in range(16))
+    return f"TXN-{encoded_time}{random_part}"
 
 class Entry(Base):
     __tablename__ = "entries"
@@ -28,13 +36,15 @@ class Entry(Base):
     description     = Column(Text, nullable=True)
     gl_code         = Column(String, nullable=True)
     gl_name         = Column(String, nullable=True)
-    amount          = Column(Float, nullable=False)
-    sst_rate        = Column(Float, default=0)
-    sst_amount      = Column(Float, default=0)
-    total           = Column(Float, nullable=False)
+    amount          = Column(MONEY_TYPE, nullable=False)
+    sst_rate        = Column(PERCENT_TYPE, default=0)
+    sst_amount      = Column(MONEY_TYPE, default=0)
+    total           = Column(MONEY_TYPE, nullable=False)
     orig_ccy        = Column(String, default="MYR")
-    orig_amount     = Column(Float, nullable=True)
-    fx_rate         = Column(Float, nullable=True)
+    orig_amount     = Column(MONEY_TYPE, nullable=True)
+    fx_rate         = Column(RATE_TYPE, nullable=True)
+    rate_source     = Column(String, nullable=True)
+    rate_locked_at  = Column(DateTime, nullable=True)
     doc_ref         = Column(String, nullable=True)           # file path or storage key
     linked_to       = Column(String, nullable=True)           # short_id of related entry
     idempotency_key = Column(String, unique=True, index=True, nullable=True)
@@ -45,9 +55,9 @@ class Entry(Base):
     voided_at       = Column(DateTime, nullable=True)
     void_reason     = Column(Text, nullable=True)
     # Payment-specific fields
-    paid            = Column(Float, nullable=True)
-    balance_owed    = Column(Float, nullable=True)
-    discount_received = Column(Float, nullable=True)
+    paid            = Column(MONEY_TYPE, nullable=True)
+    balance_owed    = Column(MONEY_TYPE, nullable=True)
+    discount_received = Column(MONEY_TYPE, nullable=True)
 
 
 class AuditLog(Base):
@@ -63,7 +73,7 @@ class AuditLog(Base):
     supplier    = Column(String, nullable=True)
     reference   = Column(String, nullable=True)
     entry_type  = Column(String, nullable=True)
-    amount      = Column(Float, nullable=True)
+    amount      = Column(MONEY_TYPE, nullable=True)
     doc_ref     = Column(String, nullable=True)
     description = Column(Text, nullable=True)
 

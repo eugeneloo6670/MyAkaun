@@ -4,10 +4,74 @@ from sqlalchemy import case, func
 from typing import Optional
 from database import get_db
 from models.entry import Entry
+from money import MONEY_TOLERANCE, ZERO, money, money_sum
 from datetime import datetime
 
 router = APIRouter()
-VISIBLE_BALANCE_TOLERANCE = 0.005
+VISIBLE_BALANCE_TOLERANCE = MONEY_TOLERANCE
+
+
+def apply_credit(open_purchases: list[dict], amount, linked_to: str | None = None) -> None:
+    remaining = money(amount)
+    if remaining <= ZERO:
+        return
+
+    ordered = open_purchases
+    if linked_to:
+        linked = [p for p in open_purchases if p["short_id"] == linked_to]
+        others = [p for p in open_purchases if p["short_id"] != linked_to]
+        ordered = linked + others
+
+    for purchase in ordered:
+        if remaining <= ZERO:
+            break
+        available = purchase["remaining"]
+        if available <= ZERO:
+            continue
+        applied = min(available, remaining)
+        purchase["remaining"] = money(available - applied)
+        remaining = money(remaining - applied)
+
+
+def aged_outstanding(entries: list[Entry], now: datetime) -> dict[str, object]:
+    purchases = sorted(
+        (e for e in entries if e.type == "purchase"),
+        key=lambda e: (e.date, e.id or 0),
+    )
+    open_purchases = [
+        {
+            "short_id": e.short_id,
+            "date": e.date,
+            "remaining": money(e.total),
+        }
+        for e in purchases
+    ]
+
+    reductions = sorted(
+        (e for e in entries if e.type in {"return", "payment"}),
+        key=lambda e: (e.date, e.id or 0),
+    )
+    for e in reductions:
+        if e.type == "return":
+            apply_credit(open_purchases, abs(e.total or ZERO), e.linked_to)
+        elif e.type == "payment":
+            apply_credit(open_purchases, money(e.paid or ZERO) + money(e.discount_received or ZERO))
+
+    aged = {"current": ZERO, "d30": ZERO, "d60": ZERO, "d90plus": ZERO}
+    for purchase in open_purchases:
+        remaining = purchase["remaining"]
+        if remaining <= ZERO:
+            continue
+        days = (now - datetime.strptime(purchase["date"], "%Y-%m-%d")).days
+        if days <= 30:
+            aged["current"] = money(aged["current"] + remaining)
+        elif days <= 60:
+            aged["d30"] = money(aged["d30"] + remaining)
+        elif days <= 90:
+            aged["d60"] = money(aged["d60"] + remaining)
+        else:
+            aged["d90plus"] = money(aged["d90plus"] + remaining)
+    return aged
 
 
 @router.get("/month-end/{month}")
@@ -24,13 +88,13 @@ def month_end_report(month: str, db: Session = Depends(get_db)):
     returns   = [e for e in entries if e.type == "return"]
     payments  = [e for e in entries if e.type == "payment"]
 
-    total_purchases = round(sum(e.total for e in purchases), 2)
-    total_returns   = round(sum(abs(e.total) for e in returns), 2)
-    total_payments  = round(sum(e.paid or 0 for e in payments), 2)
-    total_discounts = round(sum(e.discount_received or 0 for e in payments), 2)
-    total_sst       = round(sum(e.sst_amount or 0 for e in entries if e.type != "payment"), 2)
-    net_purchases   = round(total_purchases - total_returns, 2)
-    closing_balance = round(total_purchases - total_returns - total_payments - total_discounts, 2)
+    total_purchases = money_sum(e.total for e in purchases)
+    total_returns   = money_sum(abs(e.total) for e in returns)
+    total_payments  = money_sum(e.paid for e in payments)
+    total_discounts = money_sum(e.discount_received for e in payments)
+    total_sst       = money_sum(e.sst_amount for e in entries if e.type != "payment")
+    net_purchases   = money(total_purchases - total_returns)
+    closing_balance = money(total_purchases - total_returns - total_payments - total_discounts)
 
     gl_groups = {}
     for e in entries:
@@ -38,10 +102,10 @@ def month_end_report(month: str, db: Session = Depends(get_db)):
             continue
         key = e.gl_code
         if key not in gl_groups:
-            gl_groups[key] = {"code": e.gl_code, "name": e.gl_name, "net": 0, "sst": 0, "total": 0, "count": 0}
-        gl_groups[key]["net"]   = round(gl_groups[key]["net"] + e.amount, 2)
-        gl_groups[key]["sst"]   = round(gl_groups[key]["sst"] + (e.sst_amount or 0), 2)
-        gl_groups[key]["total"] = round(gl_groups[key]["total"] + e.total, 2)
+            gl_groups[key] = {"code": e.gl_code, "name": e.gl_name, "net": ZERO, "sst": ZERO, "total": ZERO, "count": 0}
+        gl_groups[key]["net"]   = money(gl_groups[key]["net"] + e.amount)
+        gl_groups[key]["sst"]   = money(gl_groups[key]["sst"] + (e.sst_amount or ZERO))
+        gl_groups[key]["total"] = money(gl_groups[key]["total"] + e.total)
         gl_groups[key]["count"] += 1
 
     missing_docs = len([e for e in entries if not (e.doc_ref or "").strip()])
@@ -104,27 +168,14 @@ def creditors_report(db: Session = Depends(get_db)):
             .filter(Entry.supplier == supplier, Entry.status != "voided")
             .all()
         )
-        purchases  = round(sum(e.total for e in entries if e.type == "purchase"), 2)
-        returns    = round(sum(abs(e.total) for e in entries if e.type == "return"), 2)
-        payments   = round(sum(e.paid or 0 for e in entries if e.type == "payment"), 2)
-        discounts  = round(sum(e.discount_received or 0 for e in entries if e.type == "payment"), 2)
-        balance    = round(purchases - returns - payments - discounts, 2)
+        purchases  = money_sum(e.total for e in entries if e.type == "purchase")
+        returns    = money_sum(abs(e.total) for e in entries if e.type == "return")
+        payments   = money_sum(e.paid for e in entries if e.type == "payment")
+        discounts  = money_sum(e.discount_received for e in entries if e.type == "payment")
+        balance    = money(purchases - returns - payments - discounts)
         missing_docs = len([e for e in entries if not (e.doc_ref or "").strip()])
 
-        # Aged payables buckets
-        aged = {"current": 0, "d30": 0, "d60": 0, "d90plus": 0}
-        for e in entries:
-            if e.type != "purchase":
-                continue
-            days = (now - datetime.strptime(e.date, "%Y-%m-%d")).days
-            if days <= 30:
-                aged["current"] = round(aged["current"] + e.total, 2)
-            elif days <= 60:
-                aged["d30"] = round(aged["d30"] + e.total, 2)
-            elif days <= 90:
-                aged["d60"] = round(aged["d60"] + e.total, 2)
-            else:
-                aged["d90plus"] = round(aged["d90plus"] + e.total, 2)
+        aged = aged_outstanding(entries, now)
 
         result.append({
             "supplier": supplier,
@@ -147,7 +198,7 @@ def aged_payables(db: Session = Depends(get_db)):
     creditors = creditors_report(db)
     overdue = [c for c in creditors if c["aged"]["d60"] > 0 or c["aged"]["d90plus"] > 0]
     return {
-        "total_overdue_60d": round(sum(c["aged"]["d60"] for c in overdue), 2),
-        "total_overdue_90d": round(sum(c["aged"]["d90plus"] for c in overdue), 2),
+        "total_overdue_60d": money_sum(c["aged"]["d60"] for c in overdue),
+        "total_overdue_90d": money_sum(c["aged"]["d90plus"] for c in overdue),
         "suppliers": overdue,
     }

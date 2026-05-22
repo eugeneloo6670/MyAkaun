@@ -1,77 +1,139 @@
-# Hermes Accounting — Project Knowledge Base
+# AccountMaxxer
 
-## What This Is
+Malaysia-specific AI-assisted accounting for Accounts Payable workflows.
 
-A Malaysia-specific AI-powered accounting system built on top of the Hermes Agent
-(github.com/nousresearch/hermes-agent). Scoped initially to:
-- Recording purchases and receipts
-- Credit notes / returns
-- Payments to suppliers with settlement discount handling
-- Month-end GL balances
-- Full audit trail with kanban paper trail
-- Period locking
+AccountMaxxer is a FastAPI + SQLite + React/Vite prototype for recording and
+reviewing supplier purchases, returns / credit notes, supplier payments,
+settlement discounts, period locks, creditor aging, and audit trails. Hermes is
+kept as the agent/integration layer: chat, MCP tools, and future autonomous
+accounting actions.
 
-## Competitive Context
+## What It Does
 
-### Tofu (gotofu.com)
-- AI-powered accounts payable automation
-- Extracts line items from invoices/receipts
-- Integrates with Xero/QuickBooks
-- 200+ language OCR support
-- Starts at ~USD 79/month
-- Weakness: narrow document extraction only — no reasoning, no memory, no autonomous action
+- Records purchases, credit notes / returns, and supplier payments.
+- Tracks settlement discounts to GL 4200 as income.
+- Maintains creditor balances and settlement-aware aging buckets.
+- Supports Malaysian SST split on gross-inclusive invoice totals.
+- Supports foreign-currency entries with original amount, FX rate, rate source,
+  and rate lock timestamp.
+- Locks accounting periods and records lock/unlock audit events.
+- Keeps a full audit log for creates, voids, and period actions.
+- Uses soft voids instead of hard deletes.
+- Provides server-side count endpoints for dashboard/sidebar metrics.
+- Exposes an MCP server for Hermes accounting tools.
 
-### Access UBS Evo BSM (actiwise.com.my)
-- Malaysia-specific property/strata management system
-- Built-in LHDN e-invoicing compliance
-- AI is a chatbot layer on top of structured data — not agent-driven
-- Vertical-specific (property only)
-- Weakness: static product, AI cannot act autonomously
+## Stack
 
-### Our Differentiation
-- Hermes agent with evolving skill memory — gets smarter per client over time
-- MCP server exposes ledger as tools Hermes can act on autonomously
-- WhatsApp/Telegram integration via Hermes gateway
-- Nightly autonomous review via Hermes cron
-- Malaysia-specific: LHDN e-invoicing, SST treatment, MPERS standards baked into skills
-- Full audit trail with period locking — audit-ready from day one
-- Foreign currency support with FX rate tracking (INR, USD, SGD, CNY, EUR → MYR)
-- Multilingual document ingestion (BM, Chinese Simplified/Traditional, Tamil, English)
-- Backend entirely in English for audit clarity; client comms auto-translated
+- Backend: FastAPI, SQLAlchemy, SQLite
+- Frontend: React, Vite, CSS modules
+- Agent integration: Hermes chat endpoint plus MCP server
 
-## Currency Notes
+## Local Run
 
-Exchange rate used in demo: 1 INR = 0.04182 MYR (as of May 2026)
-Indian lakh notation: 1,00,000 = 100,000
+Backend:
 
-### Asia Trade Centre demo transactions
+```bash
+cd backend
+python -m uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+## Optional Auth
+
+Local development remains open if no token is configured.
+
+To protect `/api/*`, set:
+
+```bash
+ACCOUNTMAXXER_API_TOKEN=your-token
+ACCOUNTMAXXER_API_USER=eugene
+```
+
+Then send:
+
+```text
+Authorization: Bearer your-token
+```
+
+The frontend can send this automatically when built/run with:
+
+```bash
+VITE_ACCOUNTMAXXER_API_TOKEN=your-token
+```
+
+When auth is enabled, `recorded_by`, `voided_by`, and `authorised_by` are derived
+from the backend auth user rather than trusted from the frontend request body.
+
+## MCP Server
+
+The MCP server defaults to localhost-only:
+
+```bash
+cd backend
+python mcp_serve.py
+```
+
+Defaults:
+
+- MCP URL: `http://127.0.0.1:8001/mcp`
+- Backend API: `http://localhost:8000/api`
+
+Useful environment variables:
+
+```bash
+ACCOUNTING_API=http://localhost:8000/api
+ACCOUNTING_API_TOKEN=your-token
+MCP_HOST=127.0.0.1
+MCP_PORT=8001
+```
+
+## Money And IDs
+
+- Backend money arithmetic uses `Decimal` and SQLAlchemy `Numeric`.
+- SQLite still has loose type affinity, so this is an ORM/API precision fix. A
+  stricter production database should still get a proper migration.
+- Transaction IDs use ULID-style sortable IDs: `TXN-<26 chars>`.
+
+## Malaysian Accounting Notes
+
+- Demo exchange rate: `1 INR = 0.04182 MYR`.
+- Indian lakh notation: `1,00,000 = 100,000`.
+- SST split assumes gross-inclusive invoice totals.
+- Discount received goes to GL 4200, not against purchase expense.
+- `GET /api/periods/current` uses Malaysia UTC+8 time.
+
+### Asia Trade Centre Demo
+
 | # | Transaction | INR | MYR |
-|---|---|---|---|
-| 1 | Purchase | 1,00,000 | 4,182.00 |
+|---|---:|---:|---:|
+| 1 | Purchase | 100,000 | 4,182.00 |
 | 2 | Return | 10,000 | 418.20 |
 | 3 | Further purchase | 50,000 | 2,091.00 |
-| — | Balance owed | 1,40,000 | 5,854.80 |
-| 4 | Cheque paid | 1,35,000 | 5,645.70 |
-| — | Discount received | 5,000 | 209.10 |
+| - | Balance owed | 140,000 | 5,854.80 |
+| 4 | Cheque paid | 135,000 | 5,645.70 |
+| - | Discount received | 5,000 | 209.10 |
 
-Discount received → GL 4200 (income), not a purchase reduction.
-Final balance: 5,854.80 − 5,645.70 − 209.10 = 0.00 ✅
+Final balance: `5,854.80 - 5,645.70 - 209.10 = 0.00`.
 
-## Malaysian Regulatory Context
-
-- LHDN e-Invoice (MyInvois): mandatory for businesses above RM 150k turnover
-- SST rates: 6% or 8% service tax, 10% sales tax
-- MPERS: Malaysian Private Entities Reporting Standard (for SMEs)
-- CP204: Instalment tax estimation
-- MSIC codes required on e-invoices
-- BRN (Business Registration Number) must match SSM exactly
-
-## GL Code Structure Used
+## GL Codes
 
 | Code | Category |
-|------|----------|
+|---:|---|
 | 2100 | Accounts Payable |
-| 4200 | Discount Received (income) |
+| 4200 | Discount Received |
 | 5100 | Cost of Goods Sold |
 | 5200 | Utilities |
 | 5300 | Repairs & Maintenance |
@@ -81,12 +143,19 @@ Final balance: 5,854.80 − 5,645.70 − 209.10 = 0.00 ✅
 | 5700 | Rental & Lease |
 | 5800 | Other Expenses |
 
-## Transaction ID Format
-TXN-XXXXXX (last 6 digits of Unix timestamp)
+## Audit Trail
 
-## Audit Trail Design Principles
-- audit_log table is append-only — no UPDATE or DELETE ever exposed via API
-- Every CREATE and DELETE action is logged with timestamp, user, amount, doc ref
-- Period lock/unlock events logged in amber in audit log
-- Missing document references flagged red on kanban cards
-- Linked transactions tracked bidirectionally (credit notes link to original purchase)
+- `audit_log` is append-only by API convention and protected by SQLite triggers
+  against direct `UPDATE` and `DELETE`.
+- Every create and void is logged with timestamp, actor, supplier, amount,
+  document reference, and description.
+- Period lock/unlock events are also logged.
+- Voided entries remain in the database and are excluded from reports.
+
+## Current Roadmap
+
+Most review TODOs have been handled. The remaining major accounting upgrade is
+the reversing-entry void pattern: create a counter-entry and flag both entries
+instead of only using the current pragmatic soft-void status.
+
+See `docs/HANDOFF.md` for detailed session history and verification notes.
