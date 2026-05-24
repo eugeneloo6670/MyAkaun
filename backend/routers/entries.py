@@ -422,16 +422,19 @@ def void_entry(
             .all()
         )
         active_payments = [e for e in active_supplier_entries if e.type == "payment"]
-        balance_after_void = supplier_balance(active_supplier_entries)
-        if active_payments and balance_after_void < -MONEY_TOLERANCE:
+        remaining_purchases = [e for e in active_supplier_entries if e.type == "purchase"]
+        # Only block if payments would be left with NO remaining purchases at all.
+        # A negative balance with other purchases present is a legitimate overpayment
+        # credit (e.g. supplier owes you money). Blocking that was the over-block bug.
+        if active_payments and not remaining_purchases:
             payment_ids = ", ".join(e.short_id for e in active_payments)
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Cannot void {entry.short_id}: supplier has active payment"
-                    f"{'s' if len(active_payments) != 1 else ''} ({payment_ids}) and "
-                    f"voiding this purchase would leave a negative balance of "
-                    f"{balance_after_void:.2f}. Void or reverse the payment first."
+                    f"Cannot void {entry.short_id}: it is the only remaining purchase "
+                    f"for this supplier and active payment"
+                    f"{'s' if len(active_payments) != 1 else ''} ({payment_ids}) exist. "
+                    f"Void or reverse the payment first."
                 ),
             )
 
