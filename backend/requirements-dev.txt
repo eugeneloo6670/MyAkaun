@@ -1,0 +1,5 @@
+# Development & test-only dependencies for the AccountMaxxer backend.
+# Install with:  py -3.12 -m pip install -r requirements-dev.txt
+# Production dependencies are in requirements.txt.
+
+requests>=2.32
